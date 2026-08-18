@@ -2,11 +2,21 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request) {
   try {
-    const { username, password } = await request.json();
+    const body = await request.json().catch(() => null);
 
-    if (!username || !password) {
+    if (!body || !body.username || !body.password) {
       return NextResponse.json(
-        { error: 'Username and password are required' },
+        { error: 'Roll Number and Password are required to sign in.' },
+        { status: 400 }
+      );
+    }
+
+    const username = String(body.username).trim().toUpperCase();
+    const password = String(body.password);
+
+    if (username.length < 5) {
+      return NextResponse.json(
+        { error: 'Please enter a valid MITS Roll Number.' },
         { status: 400 }
       );
     }
@@ -19,16 +29,16 @@ export async function POST(request) {
       body: JSON.stringify({ username, password }),
     });
 
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
       return NextResponse.json(
-        { error: data.error || 'Failed to fetch attendance data from MITS GEMS' },
+        { error: data.error || 'Failed to fetch attendance data from MITS GEMS. Verify credentials.' },
         { status: response.status }
       );
     }
 
-    // Process each subject to ensure EXACT real GEMS attendance (without artificial credits/predictions)
+    // Process each subject to ensure exact attendance
     const exactAttendance = (data.attendance || []).map((item) => {
       const realAttended = item.rawAttended !== undefined 
         ? Number(item.rawAttended) 
@@ -47,7 +57,7 @@ export async function POST(request) {
       };
     });
 
-    // Calculate exact overall attendance directly from exact subject numbers
+    // Calculate exact overall attendance
     const totalAttended = exactAttendance.reduce((sum, i) => sum + i.attended, 0);
     const totalConducted = exactAttendance.reduce((sum, i) => sum + i.conducted, 0);
     const overallPercentage = totalConducted > 0 
@@ -69,7 +79,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('Attendance API Error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error while connecting to MITS GEMS portal.' },
       { status: 500 }
     );
   }
