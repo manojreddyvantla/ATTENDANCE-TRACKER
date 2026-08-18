@@ -1,7 +1,16 @@
 {
-  "name": "attendance-app",
-  "version": "0.1.0",
+  "name": "mits-attendance-tracker",
+  "version": "1.0.0",
+  "description": "Official real-time attendance tracker and bunk optimizer for MITS GEMS students",
   "private": true,
+  "author": "Manoj Kumar Reddy (CSE AI & ML)",
+  "keywords": [
+    "mits",
+    "attendance-tracker",
+    "gems",
+    "bunk-calculator",
+    "nextjs"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
