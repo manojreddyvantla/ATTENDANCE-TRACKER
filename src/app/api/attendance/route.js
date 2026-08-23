@@ -189,12 +189,54 @@ async function scrapeDirectMitsGems(username, password) {
       }
     }
 
-    // 3. Extract Official Weekly Timetable from MITS GEMS
+    // 3. Extract Official Weekly Timetable from MITS GEMS & Resolve Multi-Batch/Elective Slots
     const periodTimes = {};
     const coldefRegex = /dataIndex:\s*['"](Period\d+)['"],\s*text:\s*['"]<span[^>]*>\s*([\d:]+\s*(?:AM|PM))\s*<\/span>['"]/g;
     let colMatch;
     while ((colMatch = coldefRegex.exec(dashText)) !== null) {
       periodTimes[colMatch[1]] = colMatch[2].trim();
+    }
+
+    // Resolve any multi-batch / combined lab IDs in parallel via MITS IMS Details API
+    const multiMatches = [...dashText.matchAll(/ttWindow\(this,\s*null\s*,\s*['"]view['"]\s*,\s*['"]([^'"]+)['"]\)/g)];
+    const multiIds = [...new Set(multiMatches.map(m => m[1]))];
+
+    const resolvedSlotMap = {};
+    if (multiIds.length > 0) {
+      await Promise.all(
+        multiIds.map(async (strId) => {
+          try {
+            const res = await fetch(`http://mitsims.in/gemsonline-student/viewMyClassTtDetails.action?&str=${strId}&type=view`, {
+              headers: {
+                'Cookie': cookieHeader,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
+              cache: 'no-store',
+            });
+            const ttText = await res.text();
+            const subNameMatch = ttText.match(/value\s*:\s*['"]<span[^>]*font-weight:\s*bold;[^>]*>(.*?)<\/span>['"]/);
+            const codeMatch = ttText.match(/value\s*:\s*['"]<span[^>]*><b>([A-Za-z0-9]+)<\/b><\/span>['"]/);
+            const facMatch = ttText.match(/Faculty:\s*<b>([^<]+)<\/b>/);
+            const roomMatch = ttText.match(/Class Room:\s*<b>([^<]+)<\/b>/);
+
+            const subName = subNameMatch ? subNameMatch[1].trim() : '';
+            const code = codeMatch ? codeMatch[1].trim() : '';
+            const fac = facMatch ? facMatch[1].trim() : '';
+            const room = roomMatch && roomMatch[1].trim() !== '-' ? roomMatch[1].trim() : '';
+
+            if (code || subName) {
+              resolvedSlotMap[strId] = {
+                code: code || 'SUB',
+                subjectName: subName || subjectNames[code] || code,
+                faculty: fac || facultyMap[code] || 'MITS Faculty',
+                room: room || (code.toUpperCase().includes('LAB') || subName.toUpperCase().includes('LAB') ? 'Computer Center / Lab' : 'LH-302'),
+              };
+            }
+          } catch (err) {
+            console.warn(`Failed to resolve slot ${strId}:`, err);
+          }
+        })
+      );
     }
 
     const dayMap = {
@@ -235,6 +277,26 @@ async function scrapeDirectMitsGems(username, password) {
           const pRaw = pMatch[2];
           if (!pRaw || pRaw === "''" || pRaw === "''") continue;
 
+          const pNum = parseInt(pKey.replace('Period', ''), 10);
+          const timeStr = periodTimes[pKey] || (pNum <= 4 ? `0${8 + pNum}:00 AM` : `0${pNum - 3}:00 PM`);
+
+          // Check if it has a multi-batch ttWindow call resolved via IMS API
+          const multiIdMatch = pRaw.match(/ttWindow\(this,\s*null\s*,\s*['"]view['"]\s*,\s*['"]([^'"]+)['"]\)/);
+          if (multiIdMatch && resolvedSlotMap[multiIdMatch[1]]) {
+            const resolved = resolvedSlotMap[multiIdMatch[1]];
+            periodsList.push({
+              period: pNum,
+              periodKey: pKey,
+              time: timeStr,
+              code: resolved.code,
+              name: resolved.subjectName,
+              subjectName: resolved.subjectName,
+              faculty: resolved.faculty,
+              room: resolved.room,
+            });
+            continue;
+          }
+
           const pSpans = [];
           const spRegex = /<span[^>]*>(.*?)<\/span>/g;
           let spMatch;
@@ -242,9 +304,6 @@ async function scrapeDirectMitsGems(username, password) {
             const c = spMatch[1].replace(/<[^>]+>/g, ' ').trim();
             if (c) pSpans.push(c);
           }
-
-          const pNum = parseInt(pKey.replace('Period', ''), 10);
-          const timeStr = periodTimes[pKey] || (pNum <= 4 ? `0${8 + pNum}:00 AM` : `0${pNum - 3}:00 PM`);
 
           if (pSpans.length > 0) {
             let code = pSpans[0];
