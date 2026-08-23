@@ -171,9 +171,9 @@ export default function Dashboard() {
     showToast('✨ New Campus Lore Loaded!');
   };
 
-  // Load Session Data
+  // Load Persistent Session Data & Auto-Sync Live on Open
   useEffect(() => {
-    const stored = sessionStorage.getItem('mitsAttendanceData') || sessionStorage.getItem('attendanceData');
+    const stored = localStorage.getItem('mitsAttendanceData') || sessionStorage.getItem('mitsAttendanceData') || localStorage.getItem('attendanceData') || sessionStorage.getItem('attendanceData');
     if (!stored) {
       router.push('/');
       return;
@@ -250,6 +250,52 @@ export default function Dashboard() {
       if (savedNotes) {
         setSubjectNotes(JSON.parse(savedNotes));
       }
+
+      // Immediate background live sync with MITS GEMS upon opening
+      if (parsed.username && parsed.password && !parsed.isDemo) {
+        fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: parsed.username,
+            password: parsed.password,
+          }),
+        })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((newData) => {
+            if (newData) {
+              setData((prev) => {
+                const updated = {
+                  ...newData,
+                  username: parsed.username,
+                  password: parsed.password,
+                  todaysClasses: newData.todaysClasses || prev?.todaysClasses,
+                  initialTodaysClasses: newData.todaysClasses || prev?.initialTodaysClasses,
+                  lastUpdated: new Date().toISOString(),
+                };
+                localStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
+                sessionStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
+                return updated;
+              });
+              if (newData.weeklyTimetable && Object.keys(newData.weeklyTimetable).length > 0 && !savedTimetable) {
+                const formattedWeekly = {};
+                for (const [day, periods] of Object.entries(newData.weeklyTimetable)) {
+                  formattedWeekly[day] = (periods || []).map((p, idx) => ({
+                    period: p.period || idx + 1,
+                    time: p.time || (idx === 0 ? '09:00 AM' : `Period ${idx + 1}`),
+                    code: p.code || 'SUB',
+                    name: p.name || p.subjectName || p.code || 'Course Period',
+                    subjectName: p.subjectName || p.name || p.code || 'Course Period',
+                    room: p.room || p.roomNo || (p.code?.includes('LAB') ? 'Computer Center / Lab' : 'LH-302'),
+                    faculty: p.faculty || p.facultyName || 'MITS Faculty',
+                  }));
+                }
+                setTimetable(formattedWeekly);
+              }
+            }
+          })
+          .catch((syncErr) => console.warn('Initial background sync note:', syncErr));
+      }
     } catch (e) {
       console.error('Error loading attendance data:', e);
       router.push('/');
@@ -285,6 +331,7 @@ export default function Dashboard() {
               initialTodaysClasses: prev.initialTodaysClasses || newData.todaysClasses,
               lastUpdated: new Date().toISOString(),
             };
+            localStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
             sessionStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
             return updated;
           });
@@ -324,6 +371,7 @@ export default function Dashboard() {
           initialTodaysClasses: initialTodayClassesList.length > 0 ? initialTodayClassesList : newData.todaysClasses,
           lastUpdated: new Date().toISOString(),
         };
+        localStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
         sessionStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
         setData(updated);
         showToast('✅ GEMS Attendance synchronized successfully!');
@@ -340,6 +388,8 @@ export default function Dashboard() {
 
   const handleLogout = () => {
     soundFx.playClickSound();
+    localStorage.removeItem('mitsAttendanceData');
+    localStorage.removeItem('attendanceData');
     sessionStorage.removeItem('mitsAttendanceData');
     sessionStorage.removeItem('attendanceData');
     router.push('/');

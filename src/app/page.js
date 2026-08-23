@@ -1,14 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState('');
   const router = useRouter();
+
+  // Auto-Login: If the user previously logged in, resume session immediately without asking to sign in again
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('mitsAttendanceData') || sessionStorage.getItem('mitsAttendanceData');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && (parsed.username || parsed.student?.rollNo)) {
+          router.replace('/dashboard');
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Session check error:', err);
+    }
+    setCheckingSession(false);
+  }, [router]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -28,12 +46,16 @@ export default function LoginPage() {
         throw new Error(data.error || 'Failed to login to MITS GEMS. Check your Roll Number and Password.');
       }
 
-      sessionStorage.setItem('mitsAttendanceData', JSON.stringify({
+      const sessionPayload = {
         ...data,
         username,
         password,
         lastUpdated: new Date().toISOString(),
-      }));
+      };
+
+      // Store in persistent localStorage so it never logs out on closing the browser
+      localStorage.setItem('mitsAttendanceData', JSON.stringify(sessionPayload));
+      sessionStorage.setItem('mitsAttendanceData', JSON.stringify(sessionPayload));
 
       router.push('/dashboard');
     } catch (err) {
@@ -42,6 +64,24 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (checkingSession) {
+    return (
+      <div className="login-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div className="login-brand-orb" style={{ margin: '0 auto 1.25rem', width: '60px', height: '60px', fontSize: '1.8rem' }}>
+            ⚡
+          </div>
+          <div style={{ fontFamily: 'Outfit', fontWeight: 800, fontSize: '1.25rem', color: 'var(--text-main)' }}>
+            MITS Attendance Tracker
+          </div>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '6px' }}>
+            Connecting to your live GEMS dashboard...
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="login-container">
@@ -130,7 +170,7 @@ export default function LoginPage() {
 
         <div className="security-note-text" style={{ marginTop: '1.5rem' }}>
           <span>🛡️</span>
-          <span>Direct secure connection to MITS GEMS portal. Credentials are used solely to fetch your attendance records.</span>
+          <span>Direct secure connection to MITS GEMS portal. Credentials are stored securely on your device for seamless access.</span>
         </div>
 
         <div className="login-footer-attribution">
