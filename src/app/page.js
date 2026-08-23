@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getDemoData } from '@/lib/demoData';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -42,11 +41,6 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleLaunchDemo = () => {
-    sessionStorage.setItem('mitsAttendanceData', JSON.stringify(getDemoData()));
-    router.push('/dashboard');
   };
 
   return (
@@ -134,20 +128,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="login-divider-row">
-          <span>OR EXPLORE ALL FEATURES</span>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleLaunchDemo}
-          className="demo-mode-button"
-        >
-          <span>🚀</span>
-          <span>Try Demo Mode (Instant Access)</span>
-        </button>
-
-        <div className="security-note-text">
+        <div className="security-note-text" style={{ marginTop: '1.5rem' }}>
           <span>🛡️</span>
           <span>Direct secure connection to MITS GEMS portal. Credentials are used solely to fetch your attendance records.</span>
         </div>
