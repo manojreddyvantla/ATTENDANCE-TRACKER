@@ -22,8 +22,7 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Theme & Sound State
-  const [theme, setTheme] = useState('light');
+  // Sound State
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Active Navigation Tab: 'dashboard' | 'today' | 'calculator' | 'subjects' | 'planner' | 'profile'
@@ -40,13 +39,12 @@ export default function Dashboard() {
   const [simDeltas, setSimDeltas] = useState({});
 
   // Modals & Popups
-  // null | { type: 'subject', subject: object } | { type: 'policy' } | { type: 'leave' } | { type: 'hallticket' } | { type: 'editTimetable' }
+  // null | { type: 'subject', subject: object } | { type: 'policy' } | { type: 'leave' } | { type: 'hallticket' }
   const [activeModal, setActiveModal] = useState(null);
   const [showCelebration, setShowCelebration] = useState(false);
   const [subjectNotes, setSubjectNotes] = useState({});
   const [activeNoteText, setActiveNoteText] = useState('');
 
-  // Leave Impact Simulator State
   // Leave Impact Simulator State
   const [selectedLeaveDays, setSelectedLeaveDays] = useState(['Friday', 'Saturday']);
 
@@ -121,37 +119,15 @@ export default function Dashboard() {
     showToast(`🔔 MITS GEMS Live: Faculty just submitted attendance for Period ${postedIndex + 1} (${postedPeriodName}) via GEMS App at ${nowTime} — Marked PRESENT!`);
   };
 
-  // Timetable Editor Form State
-  const [newPeriodData, setNewPeriodData] = useState({
-    day: isSundayToday ? 'Monday' : currentTodayName,
-    period: 1,
-    time: '09:00 AM - 09:50 AM',
-    code: '',
-    name: '',
-    room: 'LH-302',
-    faculty: '',
-  });
-
   // Forecast State
   const [forecastRemaining, setForecastRemaining] = useState(30);
 
-  // Theme Initializer
+  // Light Theme Enforcer & Sound Initializer
   useEffect(() => {
-    const savedTheme = localStorage.getItem('mits_theme') || 'light';
-    setTheme(savedTheme);
-    document.documentElement.setAttribute('data-theme', savedTheme);
-
+    document.documentElement.setAttribute('data-theme', 'light');
     const isSoundOn = soundFx.isSoundEnabled();
     setSoundEnabled(isSoundOn);
   }, []);
-
-  const handleThemeChange = (newTheme) => {
-    setTheme(newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
-    localStorage.setItem('mits_theme', newTheme);
-    soundFx.playClickSound();
-    showToast(`🎨 Theme switched to ${newTheme.toUpperCase()}`);
-  };
 
   const handleToggleSound = () => {
     const nextState = soundFx.toggleSound();
@@ -667,41 +643,6 @@ export default function Dashboard() {
     });
   };
 
-  // Add Period to Custom Timetable
-  const handleAddPeriodToTimetable = (e) => {
-    e.preventDefault();
-    soundFx.playClickSound();
-    if (!newPeriodData.code && !newPeriodData.name) {
-      showToast('⚠️ Please enter Subject Code or Name');
-      return;
-    }
-    const day = newPeriodData.day || selectedDay;
-    const currentList = timetable[day] || [];
-    const updatedDayList = [
-      ...currentList,
-      {
-        period: Number(newPeriodData.period) || currentList.length + 1,
-        time: newPeriodData.time,
-        code: (newPeriodData.code || 'EXTRA').toUpperCase(),
-        name: newPeriodData.name || newPeriodData.code || 'Custom Class',
-        subjectName: newPeriodData.name || newPeriodData.code || 'Custom Class',
-        room: newPeriodData.room || 'LH-302',
-        faculty: newPeriodData.faculty || 'Faculty',
-      },
-    ].sort((a, b) => a.period - b.period);
-
-    const updatedTimetable = {
-      ...timetable,
-      [day]: updatedDayList,
-    };
-
-    setTimetable(updatedTimetable);
-    const userKey = data?.username || data?.student?.rollNo || 'user';
-    localStorage.setItem(`mits_custom_timetable_${userKey}`, JSON.stringify(updatedTimetable));
-    setActiveModal(null);
-    showToast(`✅ Period added to ${day} timetable!`);
-  };
-
   // Export CSV of Attendance Records
   const handleExportCSV = () => {
     soundFx.playClickSound();
@@ -780,9 +721,9 @@ export default function Dashboard() {
         <div className="brand-wrapper">
           <div className="brand-gradient-orb">⚡</div>
           <div>
-            <div className="brand-logo-text">MITS<span>.TRACK</span></div>
+            <div className="brand-logo-text">MITS Attendance Tracker</div>
             <div className="brand-sub-badge">
-              <span>Attendance Tracker</span>
+              <span>Madanapalle Institute of Technology &amp; Science</span>
               {data.isDemo && <span className="demo-chip-live">DEMO MODE</span>}
             </div>
           </div>
@@ -804,19 +745,6 @@ export default function Dashboard() {
 
         {/* Header Action Controls */}
         <div className="nav-actions-group">
-          {/* Theme Switcher */}
-          <select
-            className="theme-pill-select"
-            value={theme}
-            onChange={(e) => handleThemeChange(e.target.value)}
-            title="Switch Visual Theme"
-          >
-            <option value="light">☀️ Light</option>
-            <option value="dark">🌙 Dark</option>
-            <option value="cyber">⚡ Cyber</option>
-            <option value="emerald">🌲 Emerald</option>
-          </select>
-
           {/* Sound Toggle */}
           <button
             className="sound-toggle-btn"
@@ -1854,17 +1782,6 @@ export default function Dashboard() {
             </div>
 
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <button
-                className="nav-pill-btn"
-                onClick={() => {
-                  soundFx.playClickSound();
-                  setNewPeriodData((prev) => ({ ...prev, day: selectedDay === 'Sunday' ? 'Monday' : selectedDay }));
-                  setActiveModal({ type: 'editTimetable' });
-                }}
-              >
-                ➕ Add Custom Period
-              </button>
-
               <div className="day-selector-pills">
                 {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((d) => {
                   const isCurrentToday = d === currentTodayName;
@@ -2239,118 +2156,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* 16. TIMETABLE CUSTOMIZER / ADD PERIOD MODAL */}
-      {activeModal?.type === 'editTimetable' && (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal-content-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px' }}>
-            <div className="modal-header-row">
-              <div>
-                <h3 style={{ fontFamily: 'Outfit', fontSize: '1.3rem', fontWeight: 900, color: 'var(--text-main)' }}>
-                  ➕ Add Period to Timetable
-                </h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                  Add a substitute class, extra lab, or tutorial period.
-                </p>
-              </div>
-              <button className="modal-close-btn" onClick={() => setActiveModal(null)}>×</button>
-            </div>
-
-            <form onSubmit={handleAddPeriodToTimetable} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)' }}>Weekday</label>
-                  <select
-                    className="styled-text-input"
-                    value={newPeriodData.day}
-                    onChange={(e) => setNewPeriodData({ ...newPeriodData, day: e.target.value })}
-                  >
-                    {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d) => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)' }}>Period Number</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="8"
-                    className="styled-text-input"
-                    value={newPeriodData.period}
-                    onChange={(e) => setNewPeriodData({ ...newPeriodData, period: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)' }}>Subject Code</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 20CS301"
-                    className="styled-text-input"
-                    value={newPeriodData.code}
-                    onChange={(e) => setNewPeriodData({ ...newPeriodData, code: e.target.value })}
-                    required
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)' }}>Time Slot</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 09:00 - 09:50"
-                    className="styled-text-input"
-                    value={newPeriodData.time}
-                    onChange={(e) => setNewPeriodData({ ...newPeriodData, time: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)' }}>Subject Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Deep Learning Special Class"
-                  className="styled-text-input"
-                  value={newPeriodData.name}
-                  onChange={(e) => setNewPeriodData({ ...newPeriodData, name: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)' }}>Classroom / Lab</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. LH-302 / Lab-2"
-                    className="styled-text-input"
-                    value={newPeriodData.room}
-                    onChange={(e) => setNewPeriodData({ ...newPeriodData, room: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)' }}>Faculty Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Dr. R. Ramachandra Reddy"
-                    className="styled-text-input"
-                    value={newPeriodData.faculty}
-                    onChange={(e) => setNewPeriodData({ ...newPeriodData, faculty: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
-                <button type="button" className="nav-pill-btn" onClick={() => setActiveModal(null)}>Cancel</button>
-                <button type="submit" className="nav-pill-btn" style={{ background: 'var(--accent-gradient)', color: '#ffffff', border: 'none' }}>
-                  Save to Timetable
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* 17. CELEBRATION MODAL ("Done for Today! 🎉") */}
       {showCelebration && (
