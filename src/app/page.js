@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MITS_DEMO_DATA } from '@/lib/demoData';
+import { getDemoData } from '@/lib/demoData';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -45,7 +45,7 @@ export default function LoginPage() {
   };
 
   const handleLaunchDemo = () => {
-    sessionStorage.setItem('mitsAttendanceData', JSON.stringify(MITS_DEMO_DATA));
+    sessionStorage.setItem('mitsAttendanceData', JSON.stringify(getDemoData()));
     router.push('/dashboard');
   };
 

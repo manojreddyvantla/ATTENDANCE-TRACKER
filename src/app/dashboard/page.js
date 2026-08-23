@@ -47,10 +47,17 @@ export default function Dashboard() {
   const [activeNoteText, setActiveNoteText] = useState('');
 
   // Leave Impact Simulator State
+  // Leave Impact Simulator State
   const [selectedLeaveDays, setSelectedLeaveDays] = useState(['Friday', 'Saturday']);
 
+  // Day Calculation
+  const dayNamesList = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const todayDayIndex = typeof window !== 'undefined' ? new Date().getDay() : 1;
+  const currentTodayName = dayNamesList[todayDayIndex];
+  const isSundayToday = todayDayIndex === 0;
+
   // Timetable State
-  const [selectedDay, setSelectedDay] = useState('Monday');
+  const [selectedDay, setSelectedDay] = useState(isSundayToday ? 'Monday' : currentTodayName);
   const [timetable, setTimetable] = useState({});
   const [todayClassesList, setTodayClassesList] = useState([]);
   const [initialTodayClassesList, setInitialTodayClassesList] = useState([]);
@@ -116,9 +123,9 @@ export default function Dashboard() {
 
   // Timetable Editor Form State
   const [newPeriodData, setNewPeriodData] = useState({
-    day: 'Monday',
+    day: isSundayToday ? 'Monday' : currentTodayName,
     period: 1,
-    time: '09:00 - 09:50',
+    time: '09:00 AM - 09:50 AM',
     code: '',
     name: '',
     room: 'LH-302',
@@ -179,20 +186,22 @@ export default function Dashboard() {
       const randomQ = MEME_QUOTES[Math.floor(Math.random() * MEME_QUOTES.length)];
       setMemeQuote(randomQ);
 
-      // Timetable
-      const savedTimetable = localStorage.getItem('mits_custom_timetable');
+      // User-scoped Timetable
+      const userKey = parsed.username || parsed.student?.rollNo || 'user';
+      const savedTimetable = localStorage.getItem(`mits_custom_timetable_${userKey}`);
       if (savedTimetable) {
         setTimetable(JSON.parse(savedTimetable));
       } else if (parsed.weeklyTimetable && Object.keys(parsed.weeklyTimetable).length > 0) {
         const formattedWeekly = {};
         for (const [day, periods] of Object.entries(parsed.weeklyTimetable)) {
           formattedWeekly[day] = (periods || []).map((p, idx) => ({
-            period: idx + 1,
-            time: p.time ? p.time.substring(0, 5) : `0${9 + idx}:00`,
+            period: p.period || idx + 1,
+            time: p.time || (idx === 0 ? '09:00 AM' : `Period ${idx + 1}`),
             code: p.code || 'SUB',
-            name: p.subjectName || p.code || 'Course Period',
-            room: p.roomNo || 'LH-302',
-            faculty: p.facultyName || 'MITS Faculty',
+            name: p.name || p.subjectName || p.code || 'Course Period',
+            subjectName: p.subjectName || p.name || p.code || 'Course Period',
+            room: p.room || p.roomNo || (p.code?.includes('LAB') ? 'Computer Center / Lab' : 'LH-302'),
+            faculty: p.faculty || p.facultyName || 'MITS Faculty',
           }));
         }
         setTimetable(formattedWeekly);
@@ -202,20 +211,24 @@ export default function Dashboard() {
         const fallback = {
           Monday: (parsed.attendance || []).slice(0, 5).map((s, idx) => ({
             period: idx + 1,
-            time: `0${9 + idx}:00 - 0${9 + idx}:50`,
+            time: `0${9 + idx}:00 AM`,
             code: s.code,
             name: s.subjectName,
-            room: 'LH-302',
+            subjectName: s.subjectName,
+            room: s.room || 'LH-302',
             faculty: s.faculty || 'MITS Faculty',
           })),
         };
         setTimetable(fallback);
       }
 
-      // Today's classes
-      if (parsed.todaysClasses && parsed.todaysClasses.length > 0) {
+      // Today's classes (check for Sunday or empty schedule)
+      if (Array.isArray(parsed.todaysClasses)) {
         setTodayClassesList(parsed.todaysClasses);
         setInitialTodayClassesList(parsed.initialTodaysClasses || parsed.todaysClasses);
+      } else if (isSundayToday) {
+        setTodayClassesList([]);
+        setInitialTodayClassesList([]);
       } else {
         const defaultToday = (parsed.attendance || []).slice(0, 3).map((s, idx) => ({
           period: idx + 1,
@@ -226,14 +239,14 @@ export default function Dashboard() {
           room: s.room || 'LH-302',
           faculty: s.faculty || 'MITS Faculty',
           status: 'present',
-          tag: '🟢 MARKED PRESENT IN GEMS',
+          tag: '🟢 RECORDED IN GEMS',
         }));
         setTodayClassesList(defaultToday);
         setInitialTodayClassesList(defaultToday);
       }
 
       // Subject Notes
-      const savedNotes = localStorage.getItem('mits_subject_notes');
+      const savedNotes = localStorage.getItem(`mits_subject_notes_${userKey}`) || localStorage.getItem('mits_subject_notes');
       if (savedNotes) {
         setSubjectNotes(JSON.parse(savedNotes));
       }
@@ -241,7 +254,7 @@ export default function Dashboard() {
       console.error('Error loading attendance data:', e);
       router.push('/');
     }
-  }, [router]);
+  }, [router, isSundayToday]);
 
   // Background Auto-Sync Polling Interval (every 20s automatically)
   useEffect(() => {
@@ -511,7 +524,8 @@ export default function Dashboard() {
     soundFx.playClickSound();
     const updated = { ...subjectNotes, [code]: activeNoteText };
     setSubjectNotes(updated);
-    localStorage.setItem('mits_subject_notes', JSON.stringify(updated));
+    const userKey = data?.username || data?.student?.rollNo || 'user';
+    localStorage.setItem(`mits_subject_notes_${userKey}`, JSON.stringify(updated));
     showToast('💾 Subject notes saved successfully!');
   };
 
@@ -611,7 +625,7 @@ export default function Dashboard() {
       showToast('⚠️ Please enter Subject Code or Name');
       return;
     }
-    const day = newPeriodData.day;
+    const day = newPeriodData.day || selectedDay;
     const currentList = timetable[day] || [];
     const updatedDayList = [
       ...currentList,
@@ -620,6 +634,7 @@ export default function Dashboard() {
         time: newPeriodData.time,
         code: (newPeriodData.code || 'EXTRA').toUpperCase(),
         name: newPeriodData.name || newPeriodData.code || 'Custom Class',
+        subjectName: newPeriodData.name || newPeriodData.code || 'Custom Class',
         room: newPeriodData.room || 'LH-302',
         faculty: newPeriodData.faculty || 'Faculty',
       },
@@ -631,7 +646,8 @@ export default function Dashboard() {
     };
 
     setTimetable(updatedTimetable);
-    localStorage.setItem('mits_custom_timetable', JSON.stringify(updatedTimetable));
+    const userKey = data?.username || data?.student?.rollNo || 'user';
+    localStorage.setItem(`mits_custom_timetable_${userKey}`, JSON.stringify(updatedTimetable));
     setActiveModal(null);
     showToast(`✅ Period added to ${day} timetable!`);
   };
@@ -1242,14 +1258,6 @@ export default function Dashboard() {
                       )}
                     </div>
 
-                    <div>
-                      <div className="progress-track-container" style={{ margin: '10px 0' }}>
-                        <div
-                          className={`progress-fill-bar ${cardStatus}`}
-                          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-                        />
-                      </div>
-
                       <div className="subject-stats-bar-bottom">
                         <div className="attended-classes-text">
                           Attended: <strong>{sub.simAttended}/{sub.simConducted}</strong>
@@ -1260,7 +1268,6 @@ export default function Dashboard() {
                         </div>
                       </div>
                     </div>
-                  </div>
                 );
               })}
             </div>
@@ -1280,127 +1287,175 @@ export default function Dashboard() {
                 Instant real-time sync with MITS GEMS mobile app. As soon as faculty marks attendance in class, it updates here immediately.
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button
-                className="btn-trigger-live-post"
-                onClick={handleMarkAllAttended}
-                title="Mark all today's classes attended (syncs with MITS GEMS)"
-              >
-                ⚡ Mark All Attended ({todayTotalCount}/{todayTotalCount})
-              </button>
-              <button
-                className="nav-pill-btn btn-nav-recap"
-                onClick={() => {
-                  soundFx.playCelebrationFanfare();
-                  setShowCelebration(true);
-                }}
-              >
-                🎉 Done for Today Summary
-              </button>
-            </div>
-          </div>
-
-          {/* Today's Live Attendance Progress Summary Strip */}
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', padding: '14px 18px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ fontSize: '1.8rem' }}>🎓</div>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-main)' }}>
-                  Today&apos;s Attendance Progress: <span style={{ color: 'var(--safe-green)' }}>{todayPresentCount} of {todayTotalCount} Classes Attended</span>
-                </div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                  Live aggregate after today: <strong style={{ color: isOverallSafe ? 'var(--safe-green)' : 'var(--danger-red)' }}>{overallPct}% ({isOverallSafe ? 'Safe Zone' : 'Shortage Zone'})</strong> &bull; Total Attended: <strong>{totalAttended}/{totalConducted} classes</strong>
-                </div>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <span className="count-badge-total" style={{ background: 'var(--safe-green-light)', color: 'var(--safe-green)', border: '1px solid var(--safe-green-border)' }}>
-                ✓ {todayPresentCount} Present
-              </span>
-              <span className="count-badge-total" style={{ background: 'var(--danger-red-light)', color: 'var(--danger-red)', border: '1px solid var(--danger-red-border)' }}>
-                ✗ {todayClassesList.filter(c => c.status === 'absent').length} Absent
-              </span>
-              <span className="count-badge-total" style={{ background: 'var(--accent-bg-subtle)', color: 'var(--accent-primary)', border: '1px solid var(--accent-border-subtle)' }}>
-                ⏳ {todayClassesList.filter(c => c.status === 'upcoming').length} Upcoming
-              </span>
-            </div>
-          </div>
-
-          <div className="today-classes-grid">
-            {todayClassesList.map((item, idx) => {
-              const isPresent = item.status === 'present';
-              const isAbsent = item.status === 'absent';
-              const isUpcoming = item.status === 'upcoming' || (!isPresent && !isAbsent);
-              const cardClass = isPresent ? 'present' : isAbsent ? 'absent' : 'upcoming';
-
-              return (
-                <div
-                  key={idx}
-                  className={`today-class-card ${cardClass}`}
-                  style={{
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border-light)',
-                    borderLeft: isPresent
-                      ? '5px solid var(--safe-green)'
-                      : isAbsent
-                      ? '5px solid var(--danger-red)'
-                      : '5px solid var(--accent-primary)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '1.25rem',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    flexWrap: 'wrap',
-                    gap: '14px',
+            {todayClassesList.length > 0 && (
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  className="btn-trigger-live-post"
+                  onClick={handleMarkAllAttended}
+                  title="Mark all today's classes attended (syncs with MITS GEMS)"
+                >
+                  ⚡ Mark All Attended ({todayTotalCount}/{todayTotalCount})
+                </button>
+                <button
+                  className="nav-pill-btn btn-nav-recap"
+                  onClick={() => {
+                    soundFx.playCelebrationFanfare();
+                    setShowCelebration(true);
                   }}
                 >
+                  🎉 Done for Today Summary
+                </button>
+              </div>
+            )}
+          </div>
+
+          {todayClassesList.length === 0 ? (
+            <div
+              style={{
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-light)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '3rem 1.5rem',
+                textAlign: 'center',
+                marginTop: '1rem',
+              }}
+            >
+              <div style={{ fontSize: '3.2rem', marginBottom: '12px' }}>🌴</div>
+              <h3 style={{ fontFamily: 'Outfit', fontWeight: 900, fontSize: '1.45rem', color: 'var(--text-main)' }}>
+                {isSundayToday ? 'Today is Sunday — Campus Holiday!' : `No Classes Scheduled for Today (${currentTodayName})`}
+              </h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', maxWidth: '520px', margin: '10px auto 22px', lineHeight: 1.6 }}>
+                {isSundayToday
+                  ? 'No lectures or labs are held on Sundays at MITS. No attendance will be posted today in GEMS. Relax, recharge, or plan your attendance strategy for the coming week!'
+                  : `No classes are scheduled on your timetable for today (${currentTodayName}). Enjoy your time off or review your weekly schedule!`}
+              </p>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button
+                  className="nav-pill-btn active"
+                  onClick={() => {
+                    soundFx.playClickSound();
+                    setActiveTab('planner');
+                    setSelectedDay('Monday');
+                  }}
+                >
+                  🗓️ View Monday Timetable
+                </button>
+                <button
+                  className="nav-pill-btn"
+                  onClick={() => {
+                    soundFx.playClickSound();
+                    setActiveTab('calculator');
+                  }}
+                >
+                  🧮 Open Safe Bunk Simulator
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Today's Live Attendance Progress Summary Strip */}
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', padding: '14px 18px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ fontSize: '1.8rem' }}>🎓</div>
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                      <span className="today-period-pill">P{item.period}</span>
-                      <span className="today-time-badge">{item.time}</span>
-                      {item.room && <span className="today-room-chip">🚪 {item.room}</span>}
+                    <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-main)' }}>
+                      Today&apos;s Attendance Progress: <span style={{ color: 'var(--safe-green)' }}>{todayPresentCount} of {todayTotalCount} Classes Attended</span>
                     </div>
-
-                    <div style={{ fontFamily: 'Outfit', fontWeight: 800, fontSize: '1.08rem', color: 'var(--text-main)' }}>
-                      {item.subjectName || item.shortName || item.code}
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      Live aggregate after today: <strong style={{ color: isOverallSafe ? 'var(--safe-green)' : 'var(--danger-red)' }}>{overallPct}% ({isOverallSafe ? 'Safe Zone' : 'Shortage Zone'})</strong> &bull; Total Attended: <strong>{totalAttended}/{totalConducted} classes</strong>
                     </div>
-
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                      Code: <strong style={{ color: 'var(--accent-primary)' }}>{item.code}</strong> &bull; 👤 {item.faculty || 'MITS Faculty'}
-                    </div>
-                  </div>
-
-                  <div>
-                    {isPresent ? (
-                      <button
-                        className="period-status-pill present"
-                        onClick={() => handleToggleTodayStatus(idx, 'absent')}
-                        title="Class Attended — Click to change status"
-                      >
-                        <span>✓ Present</span>
-                      </button>
-                    ) : isAbsent ? (
-                      <button
-                        className="period-status-pill absent"
-                        onClick={() => handleToggleTodayStatus(idx, 'present')}
-                        title="Class Missed — Click to mark Present"
-                      >
-                        <span>✗ Absent</span>
-                      </button>
-                    ) : (
-                      <button
-                        className="period-status-pill upcoming"
-                        onClick={() => handleToggleTodayStatus(idx, 'present')}
-                        title="Click to Mark Present"
-                      >
-                        <span>+ Mark Present</span>
-                      </button>
-                    )}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <span className="count-badge-total" style={{ background: 'var(--safe-green-light)', color: 'var(--safe-green)', border: '1px solid var(--safe-green-border)' }}>
+                    ✓ {todayPresentCount} Present
+                  </span>
+                  <span className="count-badge-total" style={{ background: 'var(--danger-red-light)', color: 'var(--danger-red)', border: '1px solid var(--danger-red-border)' }}>
+                    ✗ {todayClassesList.filter(c => c.status === 'absent').length} Absent
+                  </span>
+                  <span className="count-badge-total" style={{ background: 'var(--accent-bg-subtle)', color: 'var(--accent-primary)', border: '1px solid var(--accent-border-subtle)' }}>
+                    ⏳ {todayClassesList.filter(c => c.status === 'upcoming').length} Upcoming
+                  </span>
+                </div>
+              </div>
+
+              <div className="today-classes-grid">
+                {todayClassesList.map((item, idx) => {
+                  const isPresent = item.status === 'present';
+                  const isAbsent = item.status === 'absent';
+                  const isUpcoming = item.status === 'upcoming' || (!isPresent && !isAbsent);
+                  const cardClass = isPresent ? 'present' : isAbsent ? 'absent' : 'upcoming';
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`today-class-card ${cardClass}`}
+                      style={{
+                        background: 'var(--bg-card)',
+                        border: '1px solid var(--border-light)',
+                        borderLeft: isPresent
+                          ? '5px solid var(--safe-green)'
+                          : isAbsent
+                          ? '5px solid var(--danger-red)'
+                          : '5px solid var(--accent-primary)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1.25rem',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '14px',
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                          <span className="today-period-pill">P{item.period}</span>
+                          <span className="today-time-badge">{item.time}</span>
+                          {item.room && <span className="today-room-chip">🚪 {item.room}</span>}
+                        </div>
+
+                        <div style={{ fontFamily: 'Outfit', fontWeight: 800, fontSize: '1.08rem', color: 'var(--text-main)' }}>
+                          {item.subjectName || item.shortName || item.code}
+                        </div>
+
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                          Code: <strong style={{ color: 'var(--accent-primary)' }}>{item.code}</strong> &bull; 👤 {item.faculty || 'MITS Faculty'}
+                        </div>
+                      </div>
+
+                      <div>
+                        {isPresent ? (
+                          <button
+                            className="period-status-pill present"
+                            onClick={() => handleToggleTodayStatus(idx, 'absent')}
+                            title="Class Attended — Click to change status"
+                          >
+                            <span>✓ Present</span>
+                          </button>
+                        ) : isAbsent ? (
+                          <button
+                            className="period-status-pill absent"
+                            onClick={() => handleToggleTodayStatus(idx, 'present')}
+                            title="Class Missed — Click to mark Present"
+                          >
+                            <span>✗ Absent</span>
+                          </button>
+                        ) : (
+                          <button
+                            className="period-status-pill upcoming"
+                            onClick={() => handleToggleTodayStatus(idx, 'present')}
+                            title="Click to Mark Present"
+                          >
+                            <span>+ Mark Present</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </section>
       )}
 
@@ -1449,13 +1504,12 @@ export default function Dashboard() {
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
-                    gap: '12px',
                   }}
                 >
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <span className="subject-code-pill">{sub.code}</span>
-                      <div style={{ fontFamily: 'Outfit', fontWeight: 900, fontSize: '1.2rem', color: sub.simPercentage >= targetPercentage ? 'var(--safe-green)' : 'var(--danger-red)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' }}>
+                      <div className="sim-sub-code-badge">{sub.code}</div>
+                      <div style={{ fontFamily: 'Outfit', fontWeight: 800, fontSize: '1.15rem', color: sub.simPercentage >= targetPercentage ? 'var(--safe-green)' : 'var(--danger-red)' }}>
                         {sub.simPercentage.toFixed(1)}%
                         {sub.isSimulated && (
                           <span style={{ fontSize: '0.75rem', marginLeft: '6px', color: isImproved ? 'var(--safe-green)' : isDropped ? 'var(--danger-red)' : 'inherit' }}>
@@ -1754,7 +1808,7 @@ export default function Dashboard() {
                 className="nav-pill-btn"
                 onClick={() => {
                   soundFx.playClickSound();
-                  setNewPeriodData((prev) => ({ ...prev, day: selectedDay }));
+                  setNewPeriodData((prev) => ({ ...prev, day: selectedDay === 'Sunday' ? 'Monday' : selectedDay }));
                   setActiveModal({ type: 'editTimetable' });
                 }}
               >
@@ -1762,30 +1816,53 @@ export default function Dashboard() {
               </button>
 
               <div className="day-selector-pills">
-                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d) => (
-                  <button
-                    key={d}
-                    className={`day-pill-btn ${selectedDay === d ? 'active' : ''}`}
-                    onClick={() => {
-                      soundFx.playClickSound();
-                      setSelectedDay(d);
-                    }}
-                  >
-                    {d.substring(0, 3)}
-                  </button>
-                ))}
+                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((d) => {
+                  const isCurrentToday = d === currentTodayName;
+                  return (
+                    <button
+                      key={d}
+                      className={`day-pill-btn ${selectedDay === d ? 'active' : ''}`}
+                      onClick={() => {
+                        soundFx.playClickSound();
+                        setSelectedDay(d);
+                      }}
+                      title={isCurrentToday ? 'Today' : d}
+                    >
+                      {d.substring(0, 3)}{isCurrentToday ? ' • Today' : ''}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
 
           <div className="period-slots-grid">
-            {(timetable[selectedDay] || []).length > 0 ? (
+            {selectedDay === 'Sunday' ? (
+              <div style={{ textAlign: 'center', padding: '3rem 1.5rem', background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)' }}>
+                <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>🏖️</div>
+                <div style={{ fontFamily: 'Outfit', fontWeight: 800, fontSize: '1.2rem', color: 'var(--text-main)' }}>
+                  Sunday — Campus Holiday / Weekend Break
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '6px', maxWidth: '420px', margin: '6px auto 16px' }}>
+                  No academic classes or laboratory sessions are scheduled on Sundays at MITS.
+                </div>
+                <button
+                  className="nav-pill-btn active"
+                  onClick={() => {
+                    soundFx.playClickSound();
+                    setSelectedDay('Monday');
+                  }}
+                >
+                  👉 View Monday Schedule
+                </button>
+              </div>
+            ) : (timetable[selectedDay] || []).length > 0 ? (
               timetable[selectedDay].map((p, idx) => (
                 <div key={idx} className="period-slot-row">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <span className="period-time-badge">Period {p.period || idx + 1}: {p.time || '09:00'}</span>
+                    <span className="period-time-badge">Period {p.period || idx + 1}: {p.time || '09:00 AM'}</span>
                     <div>
-                      <div className="period-subject-title">{p.name || p.code}</div>
+                      <div className="period-subject-title">{p.name || p.subjectName || p.code}</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                         📍 Room: {p.room || 'LH-302'} &bull; 👤 Faculty: {p.faculty || 'MITS Faculty'}
                       </div>
