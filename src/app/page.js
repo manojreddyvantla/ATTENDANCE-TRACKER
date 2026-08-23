@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { MITS_DEMO_DATA } from '@/lib/demoData';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -43,6 +44,11 @@ export default function LoginPage() {
     }
   };
 
+  const handleLaunchDemo = () => {
+    sessionStorage.setItem('mitsAttendanceData', JSON.stringify(MITS_DEMO_DATA));
+    router.push('/dashboard');
+  };
+
   return (
     <div className="login-container">
       <div className="login-glass-card">
@@ -50,7 +56,7 @@ export default function LoginPage() {
           <div className="login-brand-orb">
             ⚡
           </div>
-          <h1 className="login-title-text">MITS Attendance</h1>
+          <h1 className="login-title-text">MITS Attendance Tracker</h1>
           <p className="login-sub-text">
             Madanapalle Institute of Technology &amp; Science
           </p>
@@ -58,6 +64,14 @@ export default function LoginPage() {
             <span className="pulse-indicator"></span>
             Official GEMS Integration
           </div>
+        </div>
+
+        {/* Feature Pills */}
+        <div className="login-feature-strip">
+          <span className="login-feature-tag">🎯 Safe Bunk Optimizer</span>
+          <span className="login-feature-tag">🌴 Smart Leave Planner</span>
+          <span className="login-feature-tag">⚡ Live GEMS Stream</span>
+          <span className="login-feature-tag">🧪 What-If Simulator</span>
         </div>
 
         <form onSubmit={handleLogin} autoComplete="off">
@@ -89,7 +103,7 @@ export default function LoginPage() {
                 className="styled-text-input"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter Password"
+                placeholder="Enter GEMS Password"
                 required
                 disabled={loading}
                 autoComplete="new-password"
@@ -98,19 +112,7 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div style={{ 
-              background: '#fff1f2', 
-              color: '#e11d48', 
-              border: '1px solid #fecdd3', 
-              padding: '12px 14px', 
-              borderRadius: '12px', 
-              fontSize: '0.85rem', 
-              marginBottom: '1rem',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}>
+            <div className="error-alert-box">
               <span>⚠️</span>
               <span>{error}</span>
             </div>
@@ -132,10 +134,28 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div style={{ textAlign: 'center', marginTop: '2rem', paddingTop: '1.25rem', borderTop: '1px solid #f1f5f9', fontSize: '0.85rem', color: '#64748b' }}>
-          <div>Developed by <strong style={{ color: '#0f172a', fontWeight: 800 }}>Manoj Kumar Reddy</strong></div>
-          <div style={{ fontSize: '0.78rem', color: '#2563eb', fontWeight: 800, marginTop: '3px' }}>
-            CSE (AI &amp; ML)
+        <div className="login-divider-row">
+          <span>OR EXPLORE ALL FEATURES</span>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleLaunchDemo}
+          className="demo-mode-button"
+        >
+          <span>🚀</span>
+          <span>Try Demo Mode (Instant Access)</span>
+        </button>
+
+        <div className="security-note-text">
+          <span>🛡️</span>
+          <span>Direct secure connection to MITS GEMS portal. Credentials are used solely to fetch your attendance records.</span>
+        </div>
+
+        <div className="login-footer-attribution">
+          <div>Developed by <strong>CSE (AI &amp; ML)</strong></div>
+          <div className="login-footer-dept">
+            Madanapalle Institute of Technology &amp; Science
           </div>
         </div>
       </div>

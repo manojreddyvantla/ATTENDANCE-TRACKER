@@ -44,4 +44,5 @@ next-env.d.ts
 scratch_test.js
 test_views.py
 extract_urls.py
+parse_gems.py
 *.html
