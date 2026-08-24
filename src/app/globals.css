@@ -2391,18 +2391,118 @@ body {
   box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
 }
 
-.period-status-pill.upcoming {
-  background: var(--bg-card-subtle);
-  border: 1.5px dashed var(--accent-border-subtle);
-  color: var(--text-muted);
+.period-status-pill.upcoming,
+.period-status-pill.pending {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.08), rgba(245, 158, 11, 0.12));
+  border: 1.5px solid var(--warning-amber-border);
+  color: var(--warning-amber);
 }
 
-.period-status-pill.upcoming:hover {
-  border-color: var(--safe-green);
-  color: var(--safe-green);
-  background: var(--safe-green-light);
+.period-status-pill.upcoming:hover,
+.period-status-pill.pending:hover {
+  border-color: var(--warning-amber);
+  background: var(--warning-amber-light);
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(217, 119, 6, 0.2);
 }
+
+/* Today Class Card status themes */
+.today-class-card.present {
+  border-left: 5px solid var(--safe-green) !important;
+}
+
+.today-class-card.absent {
+  border-left: 5px solid var(--danger-red) !important;
+}
+
+.today-class-card.pending,
+.today-class-card.upcoming {
+  border-left: 5px solid var(--warning-amber) !important;
+}
+
+/* 3-State Period Action Button Group */
+.period-action-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-hover);
+  padding: 3px;
+  border-radius: 20px;
+  border: 1px solid var(--border-light);
+}
+
+.status-choice-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: 16px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  font-family: 'Outfit', sans-serif;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.status-choice-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.status-choice-btn.active.present {
+  background: var(--safe-green);
+  color: #ffffff;
+  border-color: var(--safe-green);
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.35);
+}
+
+.status-choice-btn.active.absent {
+  background: var(--danger-red);
+  color: #ffffff;
+  border-color: var(--danger-red);
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.35);
+}
+
+.status-choice-btn.active.pending {
+  background: var(--warning-amber);
+  color: #ffffff;
+  border-color: var(--warning-amber);
+  box-shadow: 0 2px 8px rgba(217, 119, 6, 0.35);
+}
+
+/* Segmented Today Attendance Multi-Color Bar */
+.today-progress-multi-bar {
+  display: flex;
+  width: 100%;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.today-bar-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.today-bar-segment.present {
+  background: var(--safe-green-gradient);
+}
+
+.today-bar-segment.absent {
+  background: var(--danger-red-gradient);
+}
+
+.today-bar-segment.pending {
+  background: linear-gradient(90deg, #fbbf24 0%, #d97706 100%);
+}
+
 
 
 

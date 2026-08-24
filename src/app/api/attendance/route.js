@@ -27,6 +27,106 @@ function getBranchFromRoll(rollNo = '') {
 }
 
 /**
+ * Parse standard timetable time string to minutes from midnight (00:00)
+ */
+function parseTimeToMinutes(timeStr, periodNum = 1) {
+  if (!timeStr) {
+    const defaultHours = [9, 10, 11, 12, 14, 15, 16];
+    const h = defaultHours[periodNum - 1] || (8 + periodNum);
+    return h * 60;
+  }
+  const clean = timeStr.trim();
+  const startPart = clean.split('-')[0].trim();
+  const match = startPart.match(/(\d{1,2}):(\d{2})(?:\s*(AM|PM))?/i);
+  if (match) {
+    let hours = parseInt(match[1], 10);
+    const mins = parseInt(match[2], 10);
+    const meridiem = match[3] ? match[3].toUpperCase() : null;
+    if (meridiem === 'PM' && hours < 12) hours += 12;
+    if (meridiem === 'AM' && hours === 12) hours = 0;
+    if (!meridiem) {
+      if (hours >= 1 && hours <= 5) hours += 12;
+    }
+    return hours * 60 + mins;
+  }
+  return (8 + periodNum) * 60;
+}
+
+/**
+ * Determine dynamic period attendance status (P = present / A = absent / NA = pending)
+ * based on live current time, period timing, and official GEMS records.
+ * Note: In MITS GEMS app, "NA" stands for Pending (Awaiting Faculty Entry).
+ */
+function evaluatePeriodStatus(timeStr, periodNum, faculty = 'MITS Faculty', subjectRecord = null, code = '', rawGemsStatus = 'NA') {
+  const now = new Date();
+  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const istNow = new Date(utc + (3600000 * 5.5));
+  const currentMinutes = istNow.getHours() * 60 + istNow.getMinutes();
+
+  const periodStartMinutes = parseTimeToMinutes(timeStr, periodNum);
+  const periodEndMinutes = periodStartMinutes + 50;
+
+  const normalizedStatus = String(rawGemsStatus || 'NA').trim().toUpperCase();
+
+  // If GEMS provides explicit status
+  if (normalizedStatus === 'P' || normalizedStatus === 'PRESENT') {
+    return {
+      status: 'present',
+      rawStatus: 'P',
+      tag: '🟢 P (RECORDED IN GEMS)',
+      postedAt: timeStr ? timeStr.split('-')[0].trim() : `${String(Math.floor(periodStartMinutes / 60)).padStart(2, '0')}:00`,
+      postedBy: `${faculty} (GEMS Mobile App)`,
+      syncSource: 'MITS GEMS Live API',
+    };
+  }
+
+  if (normalizedStatus === 'A' || normalizedStatus === 'ABSENT') {
+    return {
+      status: 'absent',
+      rawStatus: 'A',
+      tag: '🔴 A (RECORDED ABSENT IN GEMS)',
+      postedAt: timeStr ? timeStr.split('-')[0].trim() : `${String(Math.floor(periodStartMinutes / 60)).padStart(2, '0')}:00`,
+      postedBy: `${faculty} (GEMS Mobile App)`,
+      syncSource: 'MITS GEMS Live API',
+    };
+  }
+
+  // If period is in the future
+  if (currentMinutes < periodStartMinutes) {
+    return {
+      status: 'pending',
+      rawStatus: 'NA',
+      tag: '⏳ NA (UPCOMING)',
+      postedAt: 'Scheduled: ' + (timeStr || `Period ${periodNum}`),
+      postedBy: 'Awaiting Faculty Entry (GEMS Mobile App)',
+      syncSource: 'MITS GEMS Live Timetable',
+    };
+  }
+
+  // If period is currently in progress
+  if (currentMinutes >= periodStartMinutes && currentMinutes <= periodEndMinutes) {
+    return {
+      status: 'pending',
+      rawStatus: 'NA',
+      tag: '⏳ NA (CLASS IN PROGRESS)',
+      postedAt: 'In Progress',
+      postedBy: `${faculty} (GEMS Mobile App)`,
+      syncSource: 'MITS GEMS Live Sync',
+    };
+  }
+
+  // In MITS GEMS, all unposted/pending periods strictly display as NA (Pending Entry)
+  return {
+    status: 'pending',
+    rawStatus: 'NA',
+    tag: '⏳ NA (AWAITING GEMS ENTRY)',
+    postedAt: timeStr ? timeStr.split('-')[0].trim() : `${String(Math.floor(periodStartMinutes / 60)).padStart(2, '0')}:00`,
+    postedBy: 'Awaiting Faculty Entry (GEMS Mobile App)',
+    syncSource: 'MITS GEMS Android App & Portal',
+  };
+}
+
+/**
  * Direct Live MITS GEMS Scraper
  * Authenticates directly with http://mitsims.in/ and parses real-time attendance & timetable
  */
@@ -76,6 +176,58 @@ async function scrapeDirectMitsGems(username, password) {
       return { error: 'Invalid MITS GEMS Roll Number or Password.' };
     }
 
+    // 2.5 Fetch Official GEMS Mobile API Data (from GEMS.apk)
+    let mobileTodayClasses = [];
+    let mobileAttendanceDetails = [];
+    let mobileStudentInfo = null;
+    try {
+      const mobileLoginRes = await fetch('http://mitsims.in/studentAppLogin/studentLogin.action?actionType=studentAppLogin&personType=student&userId=' + encodeURIComponent(username), {
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 10; SM-G975F Build/QP1A.190711.020)',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'password=' + encodeURIComponent(password),
+        cache: 'no-store',
+      });
+      const mobileLoginText = await mobileLoginRes.text();
+      const mobileData = Function('return (' + mobileLoginText + ')')();
+      if (mobileData && mobileData.status === 'success' && mobileData.studentLoginDetails && mobileData.studentLoginDetails.length > 0) {
+        mobileStudentInfo = mobileData.studentLoginDetails[0];
+        
+        // Format IST Date as DD/MM/YYYY for GEMS Mobile API
+        const now = new Date();
+        const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+        const istNow = new Date(utc + (3600000 * 5.5));
+        const pad = (n) => String(n).padStart(2, '0');
+        const dateStr = `${pad(istNow.getDate())}/${pad(istNow.getMonth() + 1)}/${istNow.getFullYear()}`;
+
+        // Fetch Today's Classes & Real-Time Status from Official GEMS Mobile Dashboard API
+        const mobileTodayRes = await fetch(`http://mitsims.in/studentApp/dashboard.action?tkn=${mobileStudentInfo.authToken}&studentId=${mobileStudentInfo.id}&studentType=student&stdnt.id=${mobileStudentInfo.id}&dateString=${dateStr}`, {
+          headers: { 'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 10; SM-G975F Build/QP1A.190711.020)' },
+          cache: 'no-store',
+        });
+        const mobileTodayText = await mobileTodayRes.text();
+        const mobileTodayData = Function('return (' + mobileTodayText + ')')();
+        if (mobileTodayData && mobileTodayData.classDetails && Array.isArray(mobileTodayData.classDetails)) {
+          mobileTodayClasses = mobileTodayData.classDetails;
+        }
+
+        // Fetch Official Attendance Details from Mobile API
+        const mobileAttRes = await fetch(`http://mitsims.in/studentApp/getAttendanceDetails.action?tkn=${mobileStudentInfo.authToken}&stdnt.id=${mobileStudentInfo.id}&studentId=${mobileStudentInfo.id}&actionType=attendanceDetails&studentType=student`, {
+          headers: { 'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 10; SM-G975F Build/QP1A.190711.020)' },
+          cache: 'no-store',
+        });
+        const mobileAttText = await mobileAttRes.text();
+        const mobileAttData = Function('return (' + mobileAttText + ')')();
+        if (mobileAttData && mobileAttData.attendanceDetails && Array.isArray(mobileAttData.attendanceDetails)) {
+          mobileAttendanceDetails = mobileAttData.attendanceDetails;
+        }
+      }
+    } catch (mErr) {
+      console.warn('GEMS Mobile API error:', mErr);
+    }
+
     // 3. Fetch Consolidated View (Student info)
     const consRes = await fetch('http://mitsims.in/gemsonline-student/getConsolidatedView.action?', {
       headers: {
@@ -87,7 +239,7 @@ async function scrapeDirectMitsGems(username, password) {
     const consText = await consRes.text();
 
     const nameMatch = consText.match(/fieldLabel:\s*['"]Student Name['"],\s*value:\s*['"]([^'"]+)['"]/);
-    const studentName = nameMatch ? nameMatch[1].trim() : `Student (${username})`;
+    const studentName = (mobileStudentInfo && mobileStudentInfo.name) ? mobileStudentInfo.name.trim() : (nameMatch ? nameMatch[1].trim() : `Student (${username})`);
 
     const batchMatch = consText.match(/fieldLabel:\s*['"]Student Batch['"],\s*value:\s*['"]([^'"]+)['"]/);
     const batchYear = batchMatch ? batchMatch[1].trim() : '2024';
@@ -346,21 +498,77 @@ async function scrapeDirectMitsGems(username, password) {
 
       let todaysClasses = [];
       if (!isSunday) {
-        const scheduledToday = weeklyTimetable[currentDayName] || [];
-        todaysClasses = scheduledToday.map((p, idx) => ({
-          period: p.period || idx + 1,
-          time: p.time || (idx === 0 ? '09:00 AM' : idx === 1 ? '10:00 AM' : '11:00 AM'),
-          code: p.code,
-          shortName: (p.name || p.subjectName || p.code).split(' ')[0],
-          subjectName: p.name || p.subjectName || p.code,
-          room: p.room || 'LH-302',
-          faculty: p.faculty || 'MITS Faculty',
-          status: 'present',
-          tag: '🟢 RECORDED IN GEMS',
-          postedAt: p.time || 'Class Hour',
-          postedBy: `${p.faculty || 'Faculty'} (GEMS Mobile App)`,
-          syncSource: 'MITS GEMS Live API',
-        }));
+        if (mobileTodayClasses && mobileTodayClasses.length > 0) {
+          // 1. Direct integration with Official GEMS Mobile API (from GEMS.apk)
+          todaysClasses = mobileTodayClasses.map((c, idx) => {
+            const periodNum = idx + 1;
+            const timeVal = c.time ? (c.time.length <= 8 ? c.time.slice(0, 5) : c.time) : (idx === 0 ? '09:00 AM' : idx === 1 ? '10:00 AM' : '11:00 AM');
+            const rawSt = (c.status || '').trim();
+            const stLower = rawSt.toLowerCase();
+
+            let status = 'pending';
+            let finalRawStatus = 'NA';
+            let tag = '⏳ NA (AWAITING GEMS ENTRY)';
+
+            if (stLower === 'present' || stLower === 'p') {
+              status = 'present';
+              finalRawStatus = 'P';
+              tag = '🟢 P (RECORDED IN GEMS)';
+            } else if (stLower === 'absent' || stLower === 'ab' || stLower === 'a') {
+              status = 'absent';
+              finalRawStatus = 'A';
+              tag = '🔴 A (RECORDED ABSENT IN GEMS)';
+            } else if (stLower === 'permission' || stLower === 'pm') {
+              status = 'permission';
+              finalRawStatus = 'PM';
+              tag = '🟡 PM (PERMISSION IN GEMS)';
+            }
+
+            const subRecord = attendanceList.find((a) => a.code === c.code || a.subjectName === c.subjectName);
+
+            return {
+              period: periodNum,
+              time: timeVal,
+              code: c.code,
+              shortName: (c.subjectName || c.code).split(' ')[0],
+              subjectName: c.subjectName || c.code,
+              room: c.roomNo || 'LH-302',
+              faculty: c.facultyName || 'MITS Faculty',
+              status: status,
+              rawStatus: finalRawStatus,
+              tag: tag,
+              attPercentage: c.attPercentage || (subRecord ? `${subRecord.percentage}%` : ''),
+              postedAt: rawSt && rawSt !== 'NA' && rawSt !== '' ? 'Today (GEMS Official)' : undefined,
+              postedBy: c.facultyName ? `${c.facultyName} (Official GEMS App)` : 'Faculty',
+              syncSource: 'MITS GEMS Official Mobile API (APK)',
+            };
+          });
+        } else {
+          // 2. Fallback to weekly scheduled timetable
+          const scheduledToday = weeklyTimetable[currentDayName] || [];
+          todaysClasses = scheduledToday.map((p, idx) => {
+            const periodNum = p.period || idx + 1;
+            const timeVal = p.time || (idx === 0 ? '09:00 AM' : idx === 1 ? '10:00 AM' : '11:00 AM');
+            const subRecord = attendanceList.find((a) => a.code === p.code || a.subjectName === p.name || a.subjectName === p.subjectName);
+            const evalRes = evaluatePeriodStatus(timeVal, periodNum, p.faculty || 'MITS Faculty', subRecord, p.code);
+
+            return {
+              period: periodNum,
+              time: timeVal,
+              code: p.code,
+              shortName: (p.name || p.subjectName || p.code).split(' ')[0],
+              subjectName: p.name || p.subjectName || p.code,
+              room: p.room || 'LH-302',
+              faculty: p.faculty || 'MITS Faculty',
+              status: evalRes.status,
+              rawStatus: evalRes.rawStatus,
+              tag: evalRes.tag,
+              postedAt: evalRes.postedAt,
+              postedBy: evalRes.postedBy,
+              syncSource: evalRes.syncSource,
+            };
+          });
+        }
       }
 
       return {
@@ -465,20 +673,27 @@ export async function POST(request) {
           const dayOfWeekIndex = now.getDay();
           const isSunday = dayOfWeekIndex === 0;
 
-          const todaySample = isSunday ? [] : exactAttendance.slice(0, 3).map((s, idx) => ({
-            period: idx + 1,
-            time: idx === 0 ? '09:00 - 09:50' : idx === 1 ? '09:50 - 10:40' : '10:50 - 11:40',
-            code: s.code,
-            shortName: (s.subjectName || s.code).split(' ')[0],
-            subjectName: s.subjectName || s.code,
-            room: 'LH-302',
-            faculty: s.faculty || 'MITS Faculty',
-            status: 'present',
-            tag: '🟢 RECORDED IN GEMS',
-            postedAt: idx === 0 ? '09:48 AM' : idx === 1 ? '10:39 AM' : '11:38 AM',
-            postedBy: `${s.faculty || 'Faculty'} (GEMS Mobile App)`,
-            syncSource: 'MITS GEMS Live API',
-          }));
+          const todaySample = isSunday ? [] : exactAttendance.slice(0, 5).map((s, idx) => {
+            const timeVal = idx === 0 ? '09:00 - 09:50' : idx === 1 ? '09:50 - 10:40' : idx === 2 ? '10:50 - 11:40' : idx === 3 ? '11:40 - 12:30' : '01:30 - 02:20';
+            const periodNum = idx + 1;
+            const evalRes = evaluatePeriodStatus(timeVal, periodNum, s.faculty || 'MITS Faculty', s, s.code);
+
+            return {
+              period: periodNum,
+              time: timeVal,
+              code: s.code,
+              shortName: (s.subjectName || s.code).split(' ')[0],
+              subjectName: s.subjectName || s.code,
+              room: 'LH-302',
+              faculty: s.faculty || 'MITS Faculty',
+              status: evalRes.status,
+              rawStatus: evalRes.rawStatus,
+              tag: evalRes.tag,
+              postedAt: evalRes.postedAt,
+              postedBy: evalRes.postedBy,
+              syncSource: evalRes.syncSource,
+            };
+          });
 
           return NextResponse.json({
             ...data,

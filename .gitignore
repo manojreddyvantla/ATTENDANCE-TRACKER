@@ -46,3 +46,8 @@ test_views.py
 extract_urls.py
 parse_gems.py
 *.html
+*.py
+*.txt
+api_response_full.json
+students_full.js
+*.apk

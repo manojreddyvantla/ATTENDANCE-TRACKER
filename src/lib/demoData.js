@@ -62,26 +62,63 @@ const DEFAULT_TIMETABLE = {
 
 export function getDemoData() {
   const now = new Date();
+  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const istNow = new Date(utc + (3600000 * 5.5));
+  const currentMinutes = istNow.getHours() * 60 + istNow.getMinutes();
+
   const dayOfWeekIndex = now.getDay();
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const currentDayName = dayNames[dayOfWeekIndex];
   const isSunday = dayOfWeekIndex === 0;
 
   const scheduledToday = isSunday ? [] : (DEFAULT_TIMETABLE[currentDayName] || []);
-  const todaysClasses = scheduledToday.map((p, idx) => ({
-    period: p.period || idx + 1,
-    time: p.time,
-    code: p.code,
-    shortName: p.name.split(' ')[0],
-    subjectName: p.name,
-    room: p.room,
-    faculty: p.faculty || 'MITS Faculty',
-    status: 'present',
-    tag: '🟢 MARKED PRESENT IN GEMS',
-    postedAt: p.time.split('-')[0].trim(),
-    postedBy: `${p.faculty || 'Faculty'} (GEMS Mobile App)`,
-    syncSource: 'MITS GEMS Live API',
-  }));
+  const todaysClasses = scheduledToday.map((p, idx) => {
+    const periodNum = p.period || idx + 1;
+    // Parse time to minutes
+    let startMin = (8 + periodNum) * 60;
+    if (p.time) {
+      const match = p.time.split('-')[0].trim().match(/(\d{1,2}):(\d{2})/);
+      if (match) {
+        let h = parseInt(match[1], 10);
+        const m = parseInt(match[2], 10);
+        if (h >= 1 && h <= 5) h += 12;
+        startMin = h * 60 + m;
+      }
+    }
+    const endMin = startMin + 50;
+
+    let status = 'pending';
+    let rawStatus = 'NA';
+    let tag = '⏳ NA (UPCOMING)';
+    let postedAt = p.time.split('-')[0].trim();
+    let postedBy = 'Awaiting Faculty Entry (GEMS Mobile App)';
+
+    if (currentMinutes >= startMin && currentMinutes < endMin) {
+      tag = '⏳ NA (CLASS IN PROGRESS)';
+      postedAt = 'In Progress';
+      postedBy = `${p.faculty || 'Faculty'} (GEMS Mobile App)`;
+    } else if (currentMinutes >= endMin) {
+      tag = '⏳ NA (AWAITING GEMS ENTRY)';
+      postedAt = p.time.split('-')[0].trim();
+      postedBy = 'Awaiting Faculty Entry (GEMS Mobile App)';
+    }
+
+    return {
+      period: periodNum,
+      time: p.time,
+      code: p.code,
+      shortName: p.name.split(' ')[0],
+      subjectName: p.name,
+      room: p.room,
+      faculty: p.faculty || 'MITS Faculty',
+      status: status,
+      rawStatus: rawStatus,
+      tag: tag,
+      postedAt: postedAt,
+      postedBy: postedBy,
+      syncSource: 'MITS GEMS Live API',
+    };
+  });
 
   return {
     isDemo: true,

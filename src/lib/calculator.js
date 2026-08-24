@@ -326,14 +326,14 @@ export function calculateTodayDeltas(todayClassesList = [], initialTodayClassesL
   const initialStatusMap = {};
   initialTodayClassesList.forEach((c, idx) => {
     const key = c.id || `${c.code || 'SUB'}_${c.period || idx}`;
-    initialStatusMap[key] = c.status || 'upcoming';
+    initialStatusMap[key] = c.status || 'pending';
   });
 
   todayClassesList.forEach((c, idx) => {
     const code = c.code || 'UNKNOWN';
     const key = c.id || `${c.code || 'SUB'}_${c.period || idx}`;
-    const initialStatus = initialStatusMap[key] || c.initialStatus || 'upcoming';
-    const currentStatus = c.status || 'upcoming';
+    const initialStatus = initialStatusMap[key] || c.initialStatus || 'pending';
+    const currentStatus = c.status || 'pending';
 
     if (!deltas[code]) {
       deltas[code] = { attendedDelta: 0, conductedDelta: 0 };
@@ -343,10 +343,12 @@ export function calculateTodayDeltas(todayClassesList = [], initialTodayClassesL
       summaryMap[code] = {
         presentPeriods: [],
         absentPeriods: [],
+        pendingPeriods: [],
         upcomingPeriods: [],
         totalPeriodsToday: 0,
         presentCount: 0,
         absentCount: 0,
+        pendingCount: 0,
         upcomingCount: 0,
       };
     }
@@ -360,7 +362,9 @@ export function calculateTodayDeltas(todayClassesList = [], initialTodayClassesL
       summaryMap[code].absentCount += 1;
       summaryMap[code].absentPeriods.push(c.period || idx + 1);
     } else {
+      summaryMap[code].pendingCount += 1;
       summaryMap[code].upcomingCount += 1;
+      summaryMap[code].pendingPeriods.push(c.period || idx + 1);
       summaryMap[code].upcomingPeriods.push(c.period || idx + 1);
     }
 

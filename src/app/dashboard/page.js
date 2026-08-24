@@ -23,7 +23,7 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
 
   // Sound State
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(() => (typeof window !== 'undefined' ? soundFx.isSoundEnabled() : true));
 
   // Active Navigation Tab: 'dashboard' | 'today' | 'calculator' | 'subjects' | 'planner' | 'profile'
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -74,6 +74,135 @@ export default function Dashboard() {
   };
 
 
+  // Helper to parse timetable time to minutes
+  const parseTimeToMinutes = (timeStr, periodNum = 1) => {
+    if (!timeStr) {
+      const defaultHours = [9, 10, 11, 12, 14, 15, 16];
+      return (defaultHours[periodNum - 1] || (8 + periodNum)) * 60;
+    }
+    const clean = timeStr.trim();
+    const startPart = clean.split('-')[0].trim();
+    const match = startPart.match(/(\d{1,2}):(\d{2})(?:\s*(AM|PM))?/i);
+    if (match) {
+      let hours = parseInt(match[1], 10);
+      const mins = parseInt(match[2], 10);
+      const meridiem = match[3] ? match[3].toUpperCase() : null;
+      if (meridiem === 'PM' && hours < 12) hours += 12;
+      if (meridiem === 'AM' && hours === 12) hours = 0;
+      if (!meridiem) {
+        if (hours >= 1 && hours <= 5) hours += 12;
+      }
+      return hours * 60 + mins;
+    }
+    return (8 + periodNum) * 60;
+  };
+
+  // Auto-Detect Status by Live Clock (strictly adhering to GEMS standard)
+  const handleAutoDetectByTime = () => {
+    soundFx.playClickSound();
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    let markedPending = 0;
+
+    setTodayClassesList((prev) => {
+      const updated = prev.map((c, idx) => {
+        const periodNum = c.period || idx + 1;
+        const startMin = parseTimeToMinutes(c.time, periodNum);
+        const endMin = startMin + 50;
+
+        if (c.rawStatus === 'P') {
+          return {
+            ...c,
+            status: 'present',
+            tag: '🟢 P (RECORDED IN GEMS)',
+          };
+        }
+        if (c.rawStatus === 'A') {
+          return {
+            ...c,
+            status: 'absent',
+            tag: '🔴 A (RECORDED ABSENT IN GEMS)',
+          };
+        }
+
+        markedPending++;
+        if (currentMinutes < startMin) {
+          return {
+            ...c,
+            status: 'pending',
+            rawStatus: 'NA',
+            tag: '⏳ NA (UPCOMING)',
+            postedAt: 'Scheduled: ' + (c.time || `Period ${periodNum}`),
+            postedBy: 'Awaiting Faculty Entry (GEMS Mobile App)',
+            syncSource: 'MITS GEMS Live Timetable',
+          };
+        } else if (currentMinutes >= startMin && currentMinutes <= endMin) {
+          return {
+            ...c,
+            status: 'pending',
+            rawStatus: 'NA',
+            tag: '⏳ NA (CLASS IN PROGRESS)',
+            postedAt: 'In Progress',
+            postedBy: c.faculty ? `${c.faculty} (GEMS Mobile App)` : 'Faculty (GEMS Mobile App)',
+            syncSource: 'MITS GEMS Live Sync',
+          };
+        } else {
+          return {
+            ...c,
+            status: 'pending',
+            rawStatus: 'NA',
+            tag: '⏳ NA (AWAITING GEMS ENTRY)',
+            postedAt: c.time ? c.time.split('-')[0].trim() : `${String(Math.floor(startMin / 60)).padStart(2, '0')}:00`,
+            postedBy: 'Awaiting Faculty Entry (GEMS Mobile App)',
+            syncSource: 'MITS GEMS Android App & Portal',
+          };
+        }
+      });
+
+      if (data) {
+        const updatedData = {
+          ...data,
+          todaysClasses: updated,
+          initialTodaysClasses: initialTodayClassesList.length > 0 ? initialTodayClassesList : prev,
+          lastUpdated: new Date().toISOString(),
+        };
+        sessionStorage.setItem('mitsAttendanceData', JSON.stringify(updatedData));
+      }
+
+      return updated;
+    });
+
+    showToast(`⏰ Synchronized with GEMS: All pending periods set to NA (Awaiting Faculty Entry).`);
+  };
+
+  // Reset All to Pending (Awaiting GEMS Submission)
+  const handleResetAllPending = () => {
+    soundFx.playClickSound();
+    setTodayClassesList((prev) => {
+      const updated = prev.map((c) => ({
+        ...c,
+        status: 'pending',
+        tag: '⏳ PENDING IN GEMS',
+        postedAt: 'Scheduled: ' + c.time,
+        postedBy: 'Awaiting Faculty Entry (GEMS Mobile App)',
+        syncSource: 'MITS GEMS Live Schedule',
+      }));
+
+      if (data) {
+        const updatedData = {
+          ...data,
+          todaysClasses: updated,
+          initialTodaysClasses: initialTodayClassesList.length > 0 ? initialTodayClassesList : prev,
+          lastUpdated: new Date().toISOString(),
+        };
+        sessionStorage.setItem('mitsAttendanceData', JSON.stringify(updatedData));
+      }
+      return updated;
+    });
+    showToast(`⏳ All ${todayClassesList.length} periods reset to PENDING (Awaiting GEMS).`);
+  };
+
   // Simulate Instant Faculty Attendance Post from MITS GEMS Mobile App
   const handleSimulateFacultyLivePost = () => {
     soundFx.playCelebrationFanfare();
@@ -83,7 +212,7 @@ export default function Dashboard() {
     let postedIndex = -1;
 
     setTodayClassesList((prev) => {
-      let targetIdx = prev.findIndex((c) => c.status === 'upcoming');
+      let targetIdx = prev.findIndex((c) => c.status === 'pending' || c.status === 'upcoming');
       if (targetIdx === -1) targetIdx = prev.length - 1;
       postedIndex = targetIdx;
 
@@ -115,18 +244,15 @@ export default function Dashboard() {
       return updated;
     });
 
-    setLastSyncedText('Just now');
     showToast(`🔔 MITS GEMS Live: Faculty just submitted attendance for Period ${postedIndex + 1} (${postedPeriodName}) via GEMS App at ${nowTime} — Marked PRESENT!`);
   };
 
   // Forecast State
   const [forecastRemaining, setForecastRemaining] = useState(30);
 
-  // Light Theme Enforcer & Sound Initializer
+  // Light Theme Enforcer
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', 'light');
-    const isSoundOn = soundFx.isSoundEnabled();
-    setSoundEnabled(isSoundOn);
   }, []);
 
   const handleToggleSound = () => {
@@ -149,6 +275,7 @@ export default function Dashboard() {
 
   // Load Persistent Session Data & Auto-Sync Live on Open
   useEffect(() => {
+    let isMounted = true;
     const stored = localStorage.getItem('mitsAttendanceData') || sessionStorage.getItem('mitsAttendanceData') || localStorage.getItem('attendanceData') || sessionStorage.getItem('attendanceData');
     if (!stored) {
       router.push('/');
@@ -156,122 +283,126 @@ export default function Dashboard() {
     }
     try {
       const parsed = JSON.parse(stored);
-      setData(parsed);
-
-      // Random Meme Quote
-      const randomQ = MEME_QUOTES[Math.floor(Math.random() * MEME_QUOTES.length)];
-      setMemeQuote(randomQ);
-
-      // User-scoped Timetable
       const userKey = parsed.username || parsed.student?.rollNo || 'user';
       const savedTimetable = localStorage.getItem(`mits_custom_timetable_${userKey}`);
-      if (savedTimetable) {
-        setTimetable(JSON.parse(savedTimetable));
-      } else if (parsed.weeklyTimetable && Object.keys(parsed.weeklyTimetable).length > 0) {
-        const formattedWeekly = {};
-        for (const [day, periods] of Object.entries(parsed.weeklyTimetable)) {
-          formattedWeekly[day] = (periods || []).map((p, idx) => ({
-            period: p.period || idx + 1,
-            time: p.time || (idx === 0 ? '09:00 AM' : `Period ${idx + 1}`),
-            code: p.code || 'SUB',
-            name: p.name || p.subjectName || p.code || 'Course Period',
-            subjectName: p.subjectName || p.name || p.code || 'Course Period',
-            room: p.room || p.roomNo || (p.code?.includes('LAB') ? 'Computer Center / Lab' : 'LH-302'),
-            faculty: p.faculty || p.facultyName || 'MITS Faculty',
-          }));
+
+      const timer = setTimeout(() => {
+        if (!isMounted) return;
+        setData(parsed);
+
+        // Random Meme Quote
+        const randomQ = MEME_QUOTES[Math.floor(Math.random() * MEME_QUOTES.length)];
+        setMemeQuote(randomQ);
+
+        // User-scoped Timetable
+        if (savedTimetable) {
+          setTimetable(JSON.parse(savedTimetable));
+        } else if (parsed.weeklyTimetable && Object.keys(parsed.weeklyTimetable).length > 0) {
+          const formattedWeekly = {};
+          for (const [day, periods] of Object.entries(parsed.weeklyTimetable)) {
+            formattedWeekly[day] = (periods || []).map((p, idx) => ({
+              period: p.period || idx + 1,
+              time: p.time || (idx === 0 ? '09:00 AM' : `Period ${idx + 1}`),
+              code: p.code || 'SUB',
+              name: p.name || p.subjectName || p.code || 'Course Period',
+              subjectName: p.subjectName || p.name || p.code || 'Course Period',
+              room: p.room || p.roomNo || (p.code?.includes('LAB') ? 'Computer Center / Lab' : 'LH-302'),
+              faculty: p.faculty || p.facultyName || 'MITS Faculty',
+            }));
+          }
+          setTimetable(formattedWeekly);
+        } else if (parsed.defaultTimetable) {
+          setTimetable(parsed.defaultTimetable);
         }
-        setTimetable(formattedWeekly);
-      } else if (parsed.defaultTimetable) {
-        setTimetable(parsed.defaultTimetable);
-      } else {
-        const fallback = {
-          Monday: (parsed.attendance || []).slice(0, 5).map((s, idx) => ({
-            period: idx + 1,
-            time: `0${9 + idx}:00 AM`,
-            code: s.code,
-            name: s.subjectName,
-            subjectName: s.subjectName,
-            room: s.room || 'LH-302',
-            faculty: s.faculty || 'MITS Faculty',
-          })),
-        };
-        setTimetable(fallback);
-      }
 
-      // Today's classes (check for Sunday or empty schedule)
-      if (Array.isArray(parsed.todaysClasses)) {
-        setTodayClassesList(parsed.todaysClasses);
-        setInitialTodayClassesList(parsed.initialTodaysClasses || parsed.todaysClasses);
-      } else if (isSundayToday) {
-        setTodayClassesList([]);
-        setInitialTodayClassesList([]);
-      } else {
-        const defaultToday = (parsed.attendance || []).slice(0, 3).map((s, idx) => ({
-          period: idx + 1,
-          time: idx === 0 ? '09:00 - 09:50' : idx === 1 ? '09:50 - 10:40' : '10:50 - 11:40',
-          code: s.code,
-          shortName: (s.subjectName || s.code).split(' ')[0],
-          subjectName: s.subjectName,
-          room: s.room || 'LH-302',
-          faculty: s.faculty || 'MITS Faculty',
-          status: 'present',
-          tag: '🟢 RECORDED IN GEMS',
-        }));
-        setTodayClassesList(defaultToday);
-        setInitialTodayClassesList(defaultToday);
-      }
-
-      // Subject Notes
-      const savedNotes = localStorage.getItem(`mits_subject_notes_${userKey}`) || localStorage.getItem('mits_subject_notes');
-      if (savedNotes) {
-        setSubjectNotes(JSON.parse(savedNotes));
-      }
-
-      // Immediate background live sync with MITS GEMS upon opening
-      if (parsed.username && parsed.password && !parsed.isDemo) {
-        fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: parsed.username,
-            password: parsed.password,
-          }),
-        })
-          .then((res) => (res.ok ? res.json() : null))
-          .then((newData) => {
-            if (newData) {
-              setData((prev) => {
-                const updated = {
-                  ...newData,
-                  username: parsed.username,
-                  password: parsed.password,
-                  todaysClasses: newData.todaysClasses || prev?.todaysClasses,
-                  initialTodaysClasses: newData.todaysClasses || prev?.initialTodaysClasses,
-                  lastUpdated: new Date().toISOString(),
-                };
-                localStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
-                sessionStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
-                return updated;
-              });
-              if (newData.weeklyTimetable && Object.keys(newData.weeklyTimetable).length > 0 && !savedTimetable) {
-                const formattedWeekly = {};
-                for (const [day, periods] of Object.entries(newData.weeklyTimetable)) {
-                  formattedWeekly[day] = (periods || []).map((p, idx) => ({
-                    period: p.period || idx + 1,
-                    time: p.time || (idx === 0 ? '09:00 AM' : `Period ${idx + 1}`),
-                    code: p.code || 'SUB',
-                    name: p.name || p.subjectName || p.code || 'Course Period',
-                    subjectName: p.subjectName || p.name || p.code || 'Course Period',
-                    room: p.room || p.roomNo || (p.code?.includes('LAB') ? 'Computer Center / Lab' : 'LH-302'),
-                    faculty: p.faculty || p.facultyName || 'MITS Faculty',
-                  }));
-                }
-                setTimetable(formattedWeekly);
-              }
+        // Today's classes
+        if (Array.isArray(parsed.todaysClasses)) {
+          const cleanedToday = parsed.todaysClasses.map((c) => {
+            const rawSt = (c.rawStatus || c.status || '').toUpperCase();
+            if (rawSt === 'P' || rawSt === 'PRESENT') {
+              return { ...c, status: 'present', rawStatus: 'P', tag: c.tag || '🟢 P (RECORDED IN GEMS)' };
             }
+            if (rawSt === 'A' || rawSt === 'AB' || rawSt === 'ABSENT') {
+              return { ...c, status: 'absent', rawStatus: 'A', tag: c.tag || '🔴 A (RECORDED ABSENT IN GEMS)' };
+            }
+            if (rawSt === 'PM' || rawSt === 'PERMISSION') {
+              return { ...c, status: 'permission', rawStatus: 'PM', tag: c.tag || '🟡 PM (PERMISSION IN GEMS)' };
+            }
+            return {
+              ...c,
+              status: 'pending',
+              rawStatus: 'NA',
+              tag: c.tag && c.tag.includes('NA') ? c.tag : '⏳ NA (AWAITING GEMS ENTRY)',
+            };
+          });
+          setTodayClassesList(cleanedToday);
+          setInitialTodayClassesList(cleanedToday);
+        } else if (isSundayToday) {
+          setTodayClassesList([]);
+          setInitialTodayClassesList([]);
+        }
+
+        // Subject Notes
+        const savedNotes = localStorage.getItem(`mits_subject_notes_${userKey}`) || localStorage.getItem('mits_subject_notes');
+        if (savedNotes) {
+          setSubjectNotes(JSON.parse(savedNotes));
+        }
+
+        // Immediate background live sync with MITS GEMS upon opening
+        if (parsed.username && parsed.password && !parsed.isDemo) {
+          fetch('/api/attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: parsed.username,
+              password: parsed.password,
+            }),
           })
-          .catch((syncErr) => console.warn('Initial background sync note:', syncErr));
-      }
+            .then((res) => (res.ok ? res.json() : null))
+            .then((newData) => {
+              if (newData && isMounted) {
+                if (Array.isArray(newData.todaysClasses)) {
+                  setTodayClassesList(newData.todaysClasses);
+                  setInitialTodayClassesList(newData.initialTodaysClasses || newData.todaysClasses);
+                }
+                setData((prev) => {
+                  const updated = {
+                    ...newData,
+                    username: parsed.username,
+                    password: parsed.password,
+                    todaysClasses: newData.todaysClasses || prev?.todaysClasses,
+                    initialTodaysClasses: newData.initialTodaysClasses || newData.todaysClasses || prev?.initialTodaysClasses,
+                    lastUpdated: new Date().toISOString(),
+                  };
+                  localStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
+                  sessionStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
+                  return updated;
+                });
+                if (newData.weeklyTimetable && Object.keys(newData.weeklyTimetable).length > 0 && !savedTimetable) {
+                  const formattedWeekly = {};
+                  for (const [day, periods] of Object.entries(newData.weeklyTimetable)) {
+                    formattedWeekly[day] = (periods || []).map((p, idx) => ({
+                      period: p.period || idx + 1,
+                      time: p.time || (idx === 0 ? '09:00 AM' : `Period ${idx + 1}`),
+                      code: p.code || 'SUB',
+                      name: p.name || p.subjectName || p.code || 'Course Period',
+                      subjectName: p.subjectName || p.name || p.code || 'Course Period',
+                      room: p.room || p.roomNo || (p.code?.includes('LAB') ? 'Computer Center / Lab' : 'LH-302'),
+                      faculty: p.faculty || p.facultyName || 'MITS Faculty',
+                    }));
+                  }
+                  setTimetable(formattedWeekly);
+                }
+              }
+            })
+            .catch((syncErr) => console.warn('Initial background sync note:', syncErr));
+        }
+      }, 0);
+
+      return () => {
+        isMounted = false;
+        clearTimeout(timer);
+      };
     } catch (e) {
       console.error('Error loading attendance data:', e);
       router.push('/');
@@ -298,13 +429,17 @@ export default function Dashboard() {
 
         if (res.ok) {
           const newData = await res.json();
+          if (Array.isArray(newData.todaysClasses)) {
+            setTodayClassesList(newData.todaysClasses);
+            setInitialTodayClassesList(newData.initialTodaysClasses || newData.todaysClasses);
+          }
           setData((prev) => {
             const updated = {
               ...newData,
               username: prev.username,
               password: prev.password,
-              todaysClasses: prev.todaysClasses || newData.todaysClasses,
-              initialTodaysClasses: prev.initialTodaysClasses || newData.todaysClasses,
+              todaysClasses: newData.todaysClasses || prev.todaysClasses,
+              initialTodaysClasses: newData.initialTodaysClasses || newData.todaysClasses || prev.initialTodaysClasses,
               lastUpdated: new Date().toISOString(),
             };
             localStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
@@ -339,12 +474,16 @@ export default function Dashboard() {
       });
       if (res.ok) {
         const newData = await res.json();
+        if (Array.isArray(newData.todaysClasses)) {
+          setTodayClassesList(newData.todaysClasses);
+          setInitialTodayClassesList(newData.initialTodaysClasses || newData.todaysClasses);
+        }
         const updated = {
           ...newData,
           username: data.username,
           password: data.password,
-          todaysClasses: todayClassesList.length > 0 ? todayClassesList : newData.todaysClasses,
-          initialTodaysClasses: initialTodayClassesList.length > 0 ? initialTodayClassesList : newData.todaysClasses,
+          todaysClasses: newData.todaysClasses,
+          initialTodaysClasses: newData.initialTodaysClasses || newData.todaysClasses,
           lastUpdated: new Date().toISOString(),
         };
         localStorage.setItem('mitsAttendanceData', JSON.stringify(updated));
@@ -418,7 +557,7 @@ export default function Dashboard() {
     .toUpperCase() || 'ST';
 
   // Process Subjects with Real-Time Today Deltas & What-If Simulations
-  const rawAttendanceList = data?.attendance || [];
+  const rawAttendanceList = useMemo(() => data?.attendance || [], [data?.attendance]);
 
   // Real-time Today's Deltas & Status Summary Map
   const { deltas: todayDeltas, summaryMap: todaySummaryMap } = useMemo(() => {
@@ -555,7 +694,7 @@ export default function Dashboard() {
     showToast('💾 Subject notes saved successfully!');
   };
 
-  // Toggle Today's Period Status with Live Sync Propagation
+  // Toggle Today's Period Status with Live Sync Propagation (present / absent / pending)
   const handleToggleTodayStatus = (idx, nextStatus) => {
     if (nextStatus === 'present') soundFx.playPresentSound();
     else if (nextStatus === 'absent') soundFx.playAbsentSound();
@@ -569,9 +708,9 @@ export default function Dashboard() {
       updated[idx] = {
         ...targetClass,
         status: nextStatus,
-        postedAt: nextStatus === 'present' ? (targetClass.postedAt || nowTime) : targetClass.postedAt,
-        postedBy: nextStatus === 'present' ? (targetClass.postedBy || (targetClass.faculty ? `${targetClass.faculty} (GEMS Mobile App)` : 'Faculty (GEMS Mobile App)')) : targetClass.postedBy,
-        tag: nextStatus === 'present' ? '🟢 MARKED PRESENT' : nextStatus === 'absent' ? '🔴 MARKED ABSENT' : '⏳ UPCOMING',
+        postedAt: nextStatus === 'present' || nextStatus === 'absent' ? (targetClass.postedAt || nowTime) : ('Scheduled: ' + (targetClass.time || `Period ${idx + 1}`)),
+        postedBy: nextStatus === 'present' || nextStatus === 'absent' ? (targetClass.postedBy || (targetClass.faculty ? `${targetClass.faculty} (GEMS Mobile App)` : 'Faculty (GEMS Mobile App)')) : 'Awaiting Faculty Entry (GEMS Mobile App)',
+        tag: nextStatus === 'present' ? '🟢 MARKED PRESENT' : nextStatus === 'absent' ? '🔴 MARKED ABSENT' : '⏳ PENDING IN GEMS',
         syncSource: 'MITS GEMS Live Sync',
       };
 
@@ -594,11 +733,11 @@ export default function Dashboard() {
     } else if (nextStatus === 'absent') {
       showToast(`⚠️ Period ${idx + 1} (${subName}) marked ABSENT — Stats updated across all pages!`);
     } else {
-      showToast(`⏳ Period ${idx + 1} (${subName}) reset to UPCOMING.`);
+      showToast(`⏳ Period ${idx + 1} (${subName}) set to PENDING (Awaiting GEMS).`);
     }
   };
 
-  // Mark all today's classes as Present (e.g. 3 of 3 attended)
+  // Mark all today's classes as Present (e.g. attended all classes today)
   const handleMarkAllAttended = () => {
     soundFx.playCelebrationFanfare();
     const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -619,11 +758,41 @@ export default function Dashboard() {
           initialTodaysClasses: initialTodayClassesList.length > 0 ? initialTodayClassesList : prev,
           lastUpdated: new Date().toISOString(),
         };
+        localStorage.setItem('mitsAttendanceData', JSON.stringify(updatedData));
         sessionStorage.setItem('mitsAttendanceData', JSON.stringify(updatedData));
       }
       return updated;
     });
     showToast(`🎉 All ${todayClassesList.length} classes marked PRESENT — Checked with MITS GEMS!`);
+  };
+
+  // Mark all today's classes as Absent (e.g. absent from college today)
+  const handleMarkAllAbsent = () => {
+    soundFx.playAbsentSound();
+    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setTodayClassesList((prev) => {
+      const updated = prev.map((c) => ({
+        ...c,
+        status: 'absent',
+        tag: '🔴 MARKED ABSENT IN GEMS',
+        postedAt: c.postedAt || nowTime,
+        postedBy: c.postedBy || (c.faculty ? `${c.faculty} (GEMS Mobile App)` : 'Faculty (GEMS Mobile App)'),
+        syncSource: 'MITS GEMS Live Sync',
+      }));
+
+      if (data) {
+        const updatedData = {
+          ...data,
+          todaysClasses: updated,
+          initialTodaysClasses: initialTodayClassesList.length > 0 ? initialTodayClassesList : prev,
+          lastUpdated: new Date().toISOString(),
+        };
+        localStorage.setItem('mitsAttendanceData', JSON.stringify(updatedData));
+        sessionStorage.setItem('mitsAttendanceData', JSON.stringify(updatedData));
+      }
+      return updated;
+    });
+    showToast(`⚠️ All ${todayClassesList.length} classes marked ABSENT today — Shortage & safe bunks updated!`);
   };
 
 
@@ -699,6 +868,8 @@ export default function Dashboard() {
   };
 
   const todayPresentCount = todayClassesList.filter((c) => c.status === 'present').length;
+  const todayAbsentCount = todayClassesList.filter((c) => c.status === 'absent').length;
+  const todayPendingCount = todayClassesList.filter((c) => c.status === 'pending' || c.status === 'upcoming' || (!c.status || (c.status !== 'present' && c.status !== 'absent'))).length;
   const todayTotalCount = todayClassesList.length;
 
   if (!data) {
@@ -1053,64 +1224,86 @@ export default function Dashboard() {
           {/* TODAY'S CLASSES PREVIEW */}
           <section className="todays-section-wrap">
             {/* Today's Live Attendance Progress Summary Strip in Overview */}
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ fontSize: '1.5rem' }}>🎓</div>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-main)' }}>
-                    Today&apos;s Attendance Progress: <span style={{ color: 'var(--safe-green)' }}>{todayPresentCount} of {todayTotalCount} Classes Attended</span>
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Live aggregate after today: <strong style={{ color: isOverallSafe ? 'var(--safe-green)' : 'var(--danger-red)' }}>{overallPct}% ({isOverallSafe ? 'Safe Zone' : 'Shortage Zone'})</strong> &bull; Total Attended: <strong>{totalAttended}/{totalConducted} classes</strong>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', padding: '14px 18px', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ fontSize: '1.8rem' }}>🎓</div>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '0.94rem', color: 'var(--text-main)' }}>
+                      Official GEMS Attendance:{' '}
+                      <span style={{ color: 'var(--safe-green)', fontWeight: 900 }}>{todayPresentCount} Present (P)</span>
+                      {todayAbsentCount > 0 && <span style={{ color: 'var(--danger-red)', fontWeight: 900 }}> &bull; {todayAbsentCount} Absent (A)</span>}
+                      {todayPendingCount > 0 && <span style={{ color: 'var(--warning-amber)', fontWeight: 900 }}> &bull; {todayPendingCount} Pending (NA)</span>}
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}> of {todayTotalCount} Scheduled</span>
+                    </div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '3px' }}>
+                      Live aggregate after today: <strong style={{ color: isOverallSafe ? 'var(--safe-green)' : 'var(--danger-red)' }}>{overallPct}% ({isOverallSafe ? 'Safe Zone' : 'Shortage Zone'})</strong> &bull; Attended: <strong>{totalAttended}/{totalConducted}</strong> &bull; Synced with MITS GEMS Mobile App
+                    </div>
                   </div>
                 </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    className="btn-trigger-live-post"
+                    onClick={handleRefresh}
+                    title="Fetch latest real-time attendance directly from MITS GEMS Portal & Mobile App"
+                    style={{ padding: '6px 14px', fontSize: '0.8rem' }}
+                  >
+                    ⚡ Live Sync with GEMS App
+                  </button>
+                  <button
+                    className="nav-pill-btn"
+                    onClick={() => {
+                      soundFx.playClickSound();
+                      setActiveTab('today');
+                    }}
+                    style={{ fontSize: '0.8rem' }}
+                  >
+                    Full Schedule →
+                  </button>
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <button
-                  className="btn-trigger-live-post"
-                  onClick={handleMarkAllAttended}
-                  title="Mark all today's classes attended (syncs with MITS GEMS)"
-                  style={{ padding: '5px 12px', fontSize: '0.75rem' }}
-                >
-                  ⚡ Mark All Attended ({todayTotalCount}/{todayTotalCount})
-                </button>
-                <span className="count-badge-total" style={{ background: 'var(--safe-green-light)', color: 'var(--safe-green)', border: '1px solid var(--safe-green-border)' }}>
-                  ✓ {todayPresentCount} Present
-                </span>
-                <button
-                  className="nav-pill-btn"
-                  onClick={() => {
-                    soundFx.playClickSound();
-                    setActiveTab('today');
-                  }}
-                  style={{ fontSize: '0.75rem' }}
-                >
-                  View Full Schedule →
-                </button>
-              </div>
+
+              {todayTotalCount > 0 && (
+                <div className="today-progress-multi-bar">
+                  <div
+                    className="today-bar-segment present"
+                    style={{ width: `${(todayPresentCount / todayTotalCount) * 100}%` }}
+                    title={`${todayPresentCount} Present (P) in GEMS`}
+                  />
+                  <div
+                    className="today-bar-segment absent"
+                    style={{ width: `${(todayAbsentCount / todayTotalCount) * 100}%` }}
+                    title={`${todayAbsentCount} Absent (A) in GEMS`}
+                  />
+                  <div
+                    className="today-bar-segment pending"
+                    style={{ width: `${(todayPendingCount / todayTotalCount) * 100}%` }}
+                    title={`${todayPendingCount} Pending (NA) in GEMS`}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="today-classes-grid">
               {todayClassesList.map((c, idx) => {
                 const isPresent = c.status === 'present';
                 const isAbsent = c.status === 'absent';
-                const isUpcoming = c.status === 'upcoming' || (!isPresent && !isAbsent);
+                const isPending = c.status === 'pending' || c.status === 'upcoming' || (!isPresent && !isAbsent);
+                const cardClass = isPresent ? 'present' : isAbsent ? 'absent' : 'pending';
 
                 return (
                   <div
                     key={idx}
-                    className="today-class-card"
+                    className={`today-class-card ${cardClass}`}
                     style={{
-                      borderLeft: isPresent
-                        ? '5px solid var(--safe-green)'
-                        : isAbsent
-                        ? '5px solid var(--danger-red)'
-                        : '5px solid var(--accent-primary)',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-light)',
+                      borderRadius: 'var(--radius-md)',
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       padding: '1rem 1.25rem',
-                      gap: '12px',
+                      gap: '14px',
                       flexWrap: 'wrap',
                     }}
                   >
@@ -1123,36 +1316,24 @@ export default function Dashboard() {
                           {c.subjectName || c.shortName || c.code}
                         </div>
                         <div className="class-meta-text" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                          📍 {c.room || 'LH-302'} &bull; 👤 {c.faculty || 'MITS Faculty'}
+                          📍 {c.room || 'LH-302'} &bull; 👤 {c.faculty || 'MITS Faculty'} &bull; <span style={{ fontWeight: 700, color: isPresent ? 'var(--safe-green)' : isAbsent ? 'var(--danger-red)' : 'var(--warning-amber)' }}>{c.tag || (isPresent ? '🟢 P (RECORDED IN GEMS)' : isAbsent ? '🔴 A (RECORDED ABSENT)' : '⏳ NA (PENDING IN GEMS)')}</span>
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div>
                       {isPresent ? (
-                        <button
-                          className="period-status-pill present"
-                          onClick={() => handleToggleTodayStatus(idx, 'absent')}
-                          title="Marked Present in GEMS — Click to toggle"
-                        >
-                          <span>✓ Present</span>
-                        </button>
+                        <span className="period-status-pill present" style={{ cursor: 'default' }} title="Recorded as Present (P) in MITS GEMS Mobile App">
+                          <span>✓ P (Present)</span>
+                        </span>
                       ) : isAbsent ? (
-                        <button
-                          className="period-status-pill absent"
-                          onClick={() => handleToggleTodayStatus(idx, 'present')}
-                          title="Marked Absent in GEMS — Click to toggle"
-                        >
-                          <span>✗ Absent</span>
-                        </button>
+                        <span className="period-status-pill absent" style={{ cursor: 'default' }} title="Marked as Absent (A) in MITS GEMS Mobile App">
+                          <span>✗ A (Absent)</span>
+                        </span>
                       ) : (
-                        <button
-                          className="period-status-pill upcoming"
-                          onClick={() => handleToggleTodayStatus(idx, 'present')}
-                          title="Upcoming Lecture — Click to mark Present"
-                        >
-                          <span>+ Mark Present</span>
-                        </button>
+                        <span className="period-status-pill pending" style={{ cursor: 'default' }} title="NA = Pending Entry in MITS GEMS Mobile App">
+                          <span>⏳ NA (Pending)</span>
+                        </span>
                       )}
                     </div>
                   </div>
@@ -1229,8 +1410,8 @@ export default function Dashboard() {
                       )}
                       {sub.todaySummary?.upcomingCount > 0 && sub.todaySummary?.presentCount === 0 && sub.todaySummary?.absentCount === 0 && (
                         <div style={{ marginTop: '6px' }}>
-                          <span style={{ fontSize: '0.72rem', background: 'var(--accent-bg-subtle)', color: 'var(--accent-primary)', border: '1px solid var(--accent-border-subtle)', padding: '2px 8px', borderRadius: '6px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            ⏳ Today: Period P{sub.todaySummary.upcomingPeriods.join(', ')} Scheduled
+                          <span style={{ fontSize: '0.72rem', background: 'var(--warning-amber-light)', color: 'var(--warning-amber)', border: '1px solid var(--warning-amber-border)', padding: '2px 8px', borderRadius: '6px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            ⏳ Today: Period P{sub.todaySummary.upcomingPeriods.join(', ')} Scheduled (Pending Entry)
                           </span>
                         </div>
                       )}
@@ -1259,20 +1440,20 @@ export default function Dashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '10px' }}>
             <div>
               <h2 style={{ fontFamily: 'Outfit', fontSize: '1.4rem', fontWeight: 900, color: 'var(--text-main)' }}>
-                📅 Today&apos;s Live Period Schedule
+                📅 Today&apos;s Live Period Schedule &amp; GEMS Sync
               </h2>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                Instant real-time sync with MITS GEMS mobile app. As soon as faculty marks attendance in class, it updates here immediately.
+                Real-time integration with MITS GEMS mobile app. Each period reflects live status: <strong>Present</strong>, <strong>Absent</strong>, or <strong>Pending</strong>.
               </p>
             </div>
             {todayClassesList.length > 0 && (
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button
                   className="btn-trigger-live-post"
-                  onClick={handleMarkAllAttended}
-                  title="Mark all today's classes attended (syncs with MITS GEMS)"
+                  onClick={handleRefresh}
+                  title="Fetch latest real-time attendance directly from MITS GEMS Portal & Mobile App"
                 >
-                  ⚡ Mark All Attended ({todayTotalCount}/{todayTotalCount})
+                  ⚡ Live Sync with GEMS App
                 </button>
                 <button
                   className="nav-pill-btn btn-nav-recap"
@@ -1332,37 +1513,63 @@ export default function Dashboard() {
           ) : (
             <>
               {/* Today's Live Attendance Progress Summary Strip */}
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', padding: '14px 18px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ fontSize: '1.8rem' }}>🎓</div>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-main)' }}>
-                      Today&apos;s Attendance Progress: <span style={{ color: 'var(--safe-green)' }}>{todayPresentCount} of {todayTotalCount} Classes Attended</span>
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      Live aggregate after today: <strong style={{ color: isOverallSafe ? 'var(--safe-green)' : 'var(--danger-red)' }}>{overallPct}% ({isOverallSafe ? 'Safe Zone' : 'Shortage Zone'})</strong> &bull; Total Attended: <strong>{totalAttended}/{totalConducted} classes</strong>
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', padding: '16px 20px', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <div style={{ fontSize: '2rem' }}>🎓</div>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: '1.02rem', color: 'var(--text-main)' }}>
+                        Today&apos;s GEMS Attendance Progress:{' '}
+                        <span style={{ color: 'var(--safe-green)', fontWeight: 900 }}>{todayPresentCount} Present (P)</span>
+                        {todayAbsentCount > 0 && <span style={{ color: 'var(--danger-red)', fontWeight: 900 }}> &bull; {todayAbsentCount} Absent (A)</span>}
+                        {todayPendingCount > 0 && <span style={{ color: 'var(--warning-amber)', fontWeight: 900 }}> &bull; {todayPendingCount} Pending (NA)</span>}
+                        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}> of {todayTotalCount} Classes Scheduled</span>
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        Live aggregate after today: <strong style={{ color: isOverallSafe ? 'var(--safe-green)' : 'var(--danger-red)' }}>{overallPct}% ({isOverallSafe ? 'Safe Zone' : 'Shortage Zone'})</strong> &bull; Total Attended: <strong>{totalAttended}/{totalConducted} classes</strong> &bull; Synced with MITS GEMS App
+                      </div>
                     </div>
                   </div>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <span className="count-badge-total" style={{ background: 'var(--safe-green-light)', color: 'var(--safe-green)', border: '1px solid var(--safe-green-border)' }}>
+                      ✓ {todayPresentCount} Present (P)
+                    </span>
+                    <span className="count-badge-total" style={{ background: 'var(--danger-red-light)', color: 'var(--danger-red)', border: '1px solid var(--danger-red-border)' }}>
+                      ✗ {todayAbsentCount} Absent (A)
+                    </span>
+                    <span className="count-badge-total" style={{ background: 'var(--warning-amber-light)', color: 'var(--warning-amber)', border: '1px solid var(--warning-amber-border)' }}>
+                      ⏳ {todayPendingCount} Pending (NA)
+                    </span>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <span className="count-badge-total" style={{ background: 'var(--safe-green-light)', color: 'var(--safe-green)', border: '1px solid var(--safe-green-border)' }}>
-                    ✓ {todayPresentCount} Present
-                  </span>
-                  <span className="count-badge-total" style={{ background: 'var(--danger-red-light)', color: 'var(--danger-red)', border: '1px solid var(--danger-red-border)' }}>
-                    ✗ {todayClassesList.filter(c => c.status === 'absent').length} Absent
-                  </span>
-                  <span className="count-badge-total" style={{ background: 'var(--accent-bg-subtle)', color: 'var(--accent-primary)', border: '1px solid var(--accent-border-subtle)' }}>
-                    ⏳ {todayClassesList.filter(c => c.status === 'upcoming').length} Upcoming
-                  </span>
-                </div>
+
+                {todayTotalCount > 0 && (
+                  <div className="today-progress-multi-bar">
+                    <div
+                      className="today-bar-segment present"
+                      style={{ width: `${(todayPresentCount / todayTotalCount) * 100}%` }}
+                      title={`${todayPresentCount} Present (P) in GEMS`}
+                    />
+                    <div
+                      className="today-bar-segment absent"
+                      style={{ width: `${(todayAbsentCount / todayTotalCount) * 100}%` }}
+                      title={`${todayAbsentCount} Absent (A) in GEMS`}
+                    />
+                    <div
+                      className="today-bar-segment pending"
+                      style={{ width: `${(todayPendingCount / todayTotalCount) * 100}%` }}
+                      title={`${todayPendingCount} Pending (NA) in GEMS`}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="today-classes-grid">
                 {todayClassesList.map((item, idx) => {
                   const isPresent = item.status === 'present';
                   const isAbsent = item.status === 'absent';
-                  const isUpcoming = item.status === 'upcoming' || (!isPresent && !isAbsent);
-                  const cardClass = isPresent ? 'present' : isAbsent ? 'absent' : 'upcoming';
+                  const isPending = item.status === 'pending' || item.status === 'upcoming' || (!isPresent && !isAbsent);
+                  const cardClass = isPresent ? 'present' : isAbsent ? 'absent' : 'pending';
 
                   return (
                     <div
@@ -1371,11 +1578,6 @@ export default function Dashboard() {
                       style={{
                         background: 'var(--bg-card)',
                         border: '1px solid var(--border-light)',
-                        borderLeft: isPresent
-                          ? '5px solid var(--safe-green)'
-                          : isAbsent
-                          ? '5px solid var(--danger-red)'
-                          : '5px solid var(--accent-primary)',
                         borderRadius: 'var(--radius-md)',
                         padding: '1.25rem',
                         display: 'flex',
@@ -1390,6 +1592,19 @@ export default function Dashboard() {
                           <span className="today-period-pill">P{item.period}</span>
                           <span className="today-time-badge">{item.time}</span>
                           {item.room && <span className="today-room-chip">🚪 {item.room}</span>}
+                          <span
+                            style={{
+                              fontSize: '0.72rem',
+                              fontWeight: 800,
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              background: isPresent ? 'var(--safe-green-light)' : isAbsent ? 'var(--danger-red-light)' : 'var(--warning-amber-light)',
+                              color: isPresent ? 'var(--safe-green)' : isAbsent ? 'var(--danger-red)' : 'var(--warning-amber)',
+                              border: `1px solid ${isPresent ? 'var(--safe-green-border)' : isAbsent ? 'var(--danger-red-border)' : 'var(--warning-amber-border)'}`,
+                            }}
+                          >
+                            {item.tag || (isPresent ? '🟢 P (RECORDED IN GEMS)' : isAbsent ? '🔴 A (RECORDED ABSENT)' : '⏳ NA (PENDING IN GEMS)')}
+                          </span>
                         </div>
 
                         <div style={{ fontFamily: 'Outfit', fontWeight: 800, fontSize: '1.08rem', color: 'var(--text-main)' }}>
@@ -1403,29 +1618,17 @@ export default function Dashboard() {
 
                       <div>
                         {isPresent ? (
-                          <button
-                            className="period-status-pill present"
-                            onClick={() => handleToggleTodayStatus(idx, 'absent')}
-                            title="Class Attended — Click to change status"
-                          >
-                            <span>✓ Present</span>
-                          </button>
+                          <span className="period-status-pill present" style={{ cursor: 'default' }} title="Recorded as Present (P) in MITS GEMS Mobile App">
+                            <span>✓ P (Present)</span>
+                          </span>
                         ) : isAbsent ? (
-                          <button
-                            className="period-status-pill absent"
-                            onClick={() => handleToggleTodayStatus(idx, 'present')}
-                            title="Class Missed — Click to mark Present"
-                          >
-                            <span>✗ Absent</span>
-                          </button>
+                          <span className="period-status-pill absent" style={{ cursor: 'default' }} title="Marked as Absent (A) in MITS GEMS Mobile App">
+                            <span>✗ A (Absent)</span>
+                          </span>
                         ) : (
-                          <button
-                            className="period-status-pill upcoming"
-                            onClick={() => handleToggleTodayStatus(idx, 'present')}
-                            title="Click to Mark Present"
-                          >
-                            <span>+ Mark Present</span>
-                          </button>
+                          <span className="period-status-pill pending" style={{ cursor: 'default' }} title="NA = Pending Entry in MITS GEMS Mobile App">
+                            <span>⏳ NA (Pending)</span>
+                          </span>
                         )}
                       </div>
                     </div>
@@ -1824,20 +2027,69 @@ export default function Dashboard() {
                 </button>
               </div>
             ) : (timetable[selectedDay] || []).length > 0 ? (
-              timetable[selectedDay].map((p, idx) => (
-                <div key={idx} className="period-slot-row">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <span className="period-time-badge">Period {p.period || idx + 1}: {p.time || '09:00 AM'}</span>
-                    <div>
-                      <div className="period-subject-title">{p.name || p.subjectName || p.code}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                        📍 Room: {p.room || 'LH-302'} &bull; 👤 Faculty: {p.faculty || 'MITS Faculty'}
+              timetable[selectedDay].map((p, idx) => {
+                const periodNum = p.period || idx + 1;
+                const isTodayDay = selectedDay === currentTodayName;
+                const todayMatch = isTodayDay ? todayClassesList.find((tc) => tc.period === periodNum || tc.code === p.code) : null;
+                const isPresent = todayMatch?.status === 'present';
+                const isAbsent = todayMatch?.status === 'absent';
+                const isPending = todayMatch ? (!isPresent && !isAbsent) : false;
+
+                return (
+                  <div
+                    key={idx}
+                    className={`period-slot-row ${isPresent ? 'present' : isAbsent ? 'absent' : ''}`}
+                    style={{
+                      background: 'var(--bg-card)',
+                      border: isPresent ? '1px solid var(--safe-green-border)' : isAbsent ? '1px solid var(--danger-red-border)' : '1px solid var(--border-light)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '1rem 1.25rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '14px',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                      <span className="period-time-badge" style={{ fontWeight: 800 }}>
+                        P{periodNum}: {p.time || '09:00 AM'}
+                      </span>
+                      <div>
+                        <div className="period-subject-title" style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-main)' }}>
+                          {p.name || p.subjectName || p.code}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          📍 Room: <strong>{p.room || 'LH-302'}</strong> &bull; 👤 Faculty: <strong>{p.faculty || 'MITS Faculty'}</strong>
+                        </div>
                       </div>
                     </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span className="subject-code-pill">{p.code}</span>
+                      {isTodayDay && todayMatch ? (
+                        isPresent ? (
+                          <span className="period-status-pill present" style={{ cursor: 'default' }} title="Recorded Present in MITS GEMS">
+                            <span>✓ P (Present)</span>
+                          </span>
+                        ) : isAbsent ? (
+                          <span className="period-status-pill absent" style={{ cursor: 'default' }} title="Marked Absent in MITS GEMS">
+                            <span>✗ A (Absent)</span>
+                          </span>
+                        ) : (
+                          <span className="period-status-pill pending" style={{ cursor: 'default' }} title="NA = Pending in MITS GEMS">
+                            <span>⏳ NA (Pending)</span>
+                          </span>
+                        )
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--accent-primary)', background: 'var(--accent-light)', border: '1px solid var(--border-light)', padding: '4px 10px', borderRadius: '12px' }}>
+                          📅 Scheduled
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <span className="subject-code-pill">{p.code}</span>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
                 No periods scheduled for {selectedDay}. Enjoy your break! 🎉
@@ -2177,10 +2429,10 @@ export default function Dashboard() {
             <h1 className="celebration-title-text">Done for Today! 🎉</h1>
             <p className="celebration-sub-text">All classes are over. Time to relax!</p>
 
-            <div className="celebration-stat-row">
+            <div className="celebration-stat-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
               <div className="celebration-stat-card">
                 <div className="celebration-stat-num">{todayTotalCount}</div>
-                <div className="celebration-stat-label">Total Classes</div>
+                <div className="celebration-stat-label">Scheduled</div>
               </div>
               <div className="celebration-stat-card">
                 <div className="celebration-stat-num present">
@@ -2188,6 +2440,20 @@ export default function Dashboard() {
                   <span>{todayPresentCount}</span>
                 </div>
                 <div className="celebration-stat-label">Present</div>
+              </div>
+              <div className="celebration-stat-card">
+                <div className="celebration-stat-num" style={{ color: 'var(--danger-red)' }}>
+                  <span>✗</span>
+                  <span>{todayAbsentCount}</span>
+                </div>
+                <div className="celebration-stat-label">Absent</div>
+              </div>
+              <div className="celebration-stat-card">
+                <div className="celebration-stat-num" style={{ color: 'var(--warning-amber)' }}>
+                  <span>⏳</span>
+                  <span>{todayPendingCount}</span>
+                </div>
+                <div className="celebration-stat-label">Pending</div>
               </div>
             </div>
 

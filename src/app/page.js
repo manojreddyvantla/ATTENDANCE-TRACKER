@@ -13,6 +13,7 @@ export default function LoginPage() {
 
   // Auto-Login: If the user previously logged in, resume session immediately without asking to sign in again
   useEffect(() => {
+    let isMounted = true;
     try {
       const stored = localStorage.getItem('mitsAttendanceData') || sessionStorage.getItem('mitsAttendanceData');
       if (stored) {
@@ -25,7 +26,13 @@ export default function LoginPage() {
     } catch (err) {
       console.warn('Session check error:', err);
     }
-    setCheckingSession(false);
+    const timer = setTimeout(() => {
+      if (isMounted) setCheckingSession(false);
+    }, 0);
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
   }, [router]);
 
   const handleLogin = async (e) => {
