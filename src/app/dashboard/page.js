@@ -900,18 +900,31 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Student Profile Nav Pill */}
+        {/* Student Profile Nav Pill & Sign Out */}
         <div
           className="xp-level-header-pill"
-          onClick={() => {
-            soundFx.playClickSound();
-            setActiveTab('profile');
-          }}
-          style={{ cursor: 'pointer' }}
-          title="View Student Profile"
+          title="Student Profile &amp; Sign Out"
         >
-          <span>🎓 {studentName} ({rollNo})</span>
-          <span className="xp-streak-tag">🔥 {xpInfo.streak || 5}d Streak</span>
+          <span
+            onClick={() => {
+              soundFx.playClickSound();
+              setActiveTab('profile');
+            }}
+            style={{ cursor: 'pointer' }}
+            title="View Student Profile"
+          >
+            🎓 {studentName} ({rollNo})
+          </span>
+          <button
+            className="header-signout-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleLogout();
+            }}
+            title="Sign Out"
+          >
+            🚪 Sign Out
+          </button>
         </div>
 
         {/* Header Action Controls */}
@@ -978,16 +991,6 @@ export default function Dashboard() {
             ) : (
               <span>🔄 Sync</span>
             )}
-          </button>
-
-          {/* Sign Out */}
-          <button
-            className="nav-pill-btn"
-            style={{ color: 'var(--danger-red)', borderColor: 'var(--danger-red-border)' }}
-            onClick={handleLogout}
-            title="Sign Out"
-          >
-            <span>🚪 Exit</span>
           </button>
         </div>
       </header>

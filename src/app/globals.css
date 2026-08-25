@@ -491,6 +491,30 @@ body {
   font-weight: 900;
 }
 
+.header-signout-btn {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--danger-red, #ef4444);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.header-signout-btn:hover {
+  background: var(--danger-red, #ef4444);
+  color: #ffffff;
+  border-color: var(--danger-red, #ef4444);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25);
+}
+
 .nav-actions-group {
   display: flex;
   align-items: center;
